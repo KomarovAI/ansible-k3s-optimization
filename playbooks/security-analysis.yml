@@ -1,0 +1,158 @@
+---
+- name: Deep Security & Network Analysis
+  hosts: localhost
+  connection: local
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Display header
+      debug:
+        msg: |
+          ╔════════════════════════════════════════════════════════════════╗
+          ║  Deep Security & Network Configuration Analysis               ║
+          ║  Node: {{ ansible_hostname }}                                 ║
+          ╚════════════════════════════════════════════════════════════════╝
+
+    #########################################################################
+    # 1. HONEYPOT
+    #########################################################################
+    - name: Check honeypot status
+      shell: |
+        echo "=== HONEYPOT SERVICE ==="
+        systemctl status honeypot --no-pager 2>/dev/null | head -15 || echo "Honeypot not installed"
+        echo ""
+        echo "=== HONEYPOT LISTENING PORTS ==="
+        ss -tulpn | grep -E "21|23|25|110|143|3306|3389|5432" || echo "No honeypot ports detected"
+      register: honeypot
+      changed_when: false
+      failed_when: false
+
+    - name: Display honeypot status
+      debug:
+        msg: "{{ honeypot.stdout_lines }}"
+
+    - name: Check honeypot logs
+      shell: |
+        echo "=== RECENT HONEYPOT ACTIVITY (last 50 lines) ==="
+        if [ -f /var/log/honeypot.log ]; then
+          tail -50 /var/log/honeypot.log
+        else
+          echo "No honeypot logs found"
+        fi
+      register: honeypot_logs
+      changed_when: false
+      failed_when: false
+
+    - name: Display honeypot logs
+      debug:
+        msg: "{{ honeypot_logs.stdout_lines }}"
+
+    #########################################################################
+    # 2. FAIL2BAN
+    #########################################################################
+    - name: Fail2ban status
+      shell: |
+        echo "=== FAIL2BAN SERVICE ==="
+        systemctl status fail2ban --no-pager 2>/dev/null | head -15 || echo "Fail2ban not installed"
+        echo ""
+        echo "=== ACTIVE JAILS ==="
+        fail2ban-client status 2>/dev/null || echo "Fail2ban not running"
+      register: fail2ban_status
+      changed_when: false
+      failed_when: false
+
+    - name: Display fail2ban status
+      debug:
+        msg: "{{ fail2ban_status.stdout_lines }}"
+
+    - name: Fail2ban detailed jails
+      shell: |
+        echo "=== DETAILED JAIL STATUS ==="
+        for jail in $(fail2ban-client status 2>/dev/null | grep "Jail list" | sed 's/.*://; s/,//g'); do
+          echo "--- $jail ---"
+          fail2ban-client status $jail 2>/dev/null
+          echo ""
+        done
+      register: fail2ban_jails
+      changed_when: false
+      failed_when: false
+
+    - name: Display jail details
+      debug:
+        msg: "{{ fail2ban_jails.stdout_lines }}"
+
+    #########################################################################
+    # 3. FIREWALL
+    #########################################################################
+    - name: UFW status
+      shell: |
+        echo "=== UFW FIREWALL STATUS ==="
+        ufw status numbered
+      register: ufw_status
+      changed_when: false
+      failed_when: false
+
+    - name: Display UFW status
+      debug:
+        msg: "{{ ufw_status.stdout_lines }}"
+
+    - name: IPTables rules
+      shell: |
+        echo "=== IPTABLES FILTER TABLE ==="
+        iptables -L -n -v | head -100
+      register: iptables_rules
+      changed_when: false
+
+    - name: Display iptables
+      debug:
+        msg: "{{ iptables_rules.stdout_lines }}"
+
+    #########################################################################
+    # 4. OPEN PORTS ANALYSIS
+    #########################################################################
+    - name: List all listening ports
+      shell: |
+        echo "=== ALL LISTENING PORTS ==="
+        ss -tulpn | grep LISTEN | sort -t: -k2 -n
+        echo ""
+        echo "=== PORT COUNT ==="
+        echo "Total listening: $(ss -tulpn | grep LISTEN | wc -l)"
+      register: open_ports
+      changed_when: false
+
+    - name: Display open ports
+      debug:
+        msg: "{{ open_ports.stdout_lines }}"
+
+    #########################################################################
+    # 5. SSH CONFIGURATION
+    #########################################################################
+    - name: Check SSH config
+      shell: |
+        echo "=== SSH CONFIGURATION ==="
+        grep -E "^Port|^PermitRootLogin|^PasswordAuthentication|^PubkeyAuthentication" /etc/ssh/sshd_config
+      register: ssh_config
+      changed_when: false
+
+    - name: Display SSH config
+      debug:
+        msg: "{{ ssh_config.stdout_lines }}"
+
+    #########################################################################
+    # 6. SYSCTL NETWORK PARAMETERS
+    #########################################################################
+    - name: Key sysctl parameters
+      shell: |
+        echo "=== KEY SYSCTL PARAMETERS ==="
+        sysctl net.ipv4.ip_forward
+        sysctl net.core.somaxconn
+        sysctl vm.swappiness
+        sysctl fs.file-max
+        sysctl net.netfilter.nf_conntrack_max
+      register: sysctl_params
+      changed_when: false
+
+    - name: Display sysctl
+      debug:
+        msg: "{{ sysctl_params.stdout_lines }}"

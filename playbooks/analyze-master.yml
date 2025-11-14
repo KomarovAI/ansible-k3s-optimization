@@ -1,0 +1,134 @@
+---
+- name: K3s Master Node Complete Analysis
+  hosts: localhost
+  connection: local
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Display analysis header
+      debug:
+        msg: |
+          ╔════════════════════════════════════════════════════════════════╗
+          ║  K3s Master Node Complete Analysis                            ║
+          ║  Node: {{ ansible_hostname }}                                 ║
+          ║  Date: {{ ansible_date_time.iso8601 }}                        ║
+          ╚════════════════════════════════════════════════════════════════╝
+
+    #########################################################################
+    # 1. SYSTEM INFORMATION
+    #########################################################################
+    - name: Gather system information
+      shell: |
+        echo "=== SYSTEM INFO ==="
+        echo "Hostname: $(hostname)"
+        echo "Uptime: $(uptime -p)"
+        echo "Kernel: $(uname -r)"
+        echo "OS: $(grep PRETTY_NAME /etc/os-release | cut -d= -f2 | tr -d '"')"
+        echo ""
+        echo "=== CPU ==="
+        lscpu | grep -E "^Model name|^CPU\(s\)|^Thread|^Core"
+        echo ""
+        echo "=== MEMORY ==="
+        free -h
+        echo ""
+        echo "=== DISK ==="
+        df -h | grep -v tmpfs | grep -v devtmpfs
+      register: system_info
+      changed_when: false
+
+    - name: Display system info
+      debug:
+        msg: "{{ system_info.stdout_lines }}"
+
+    #########################################################################
+    # 2. SYSTEMD SERVICES
+    #########################################################################
+    - name: List running systemd services
+      shell: |
+        echo "=== ACTIVE SYSTEMD SERVICES ==="
+        systemctl list-units --type=service --state=running --no-pager | head -30
+      register: systemd_services
+      changed_when: false
+
+    - name: Display systemd services
+      debug:
+        msg: "{{ systemd_services.stdout_lines }}"
+
+    - name: Check K3s service status
+      shell: |
+        echo "=== K3S SERVICE ==="
+        systemctl status k3s --no-pager | head -20
+      register: k3s_service
+      changed_when: false
+
+    - name: Display K3s status
+      debug:
+        msg: "{{ k3s_service.stdout_lines }}"
+
+    #########################################################################
+    # 3. KUBERNETES ANALYSIS
+    #########################################################################
+    - name: Get all pods
+      shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        echo "=== ALL PODS ==="
+        kubectl get pods -A -o wide
+        echo ""
+        echo "=== POD COUNT BY NAMESPACE ==="
+        kubectl get pods -A --no-headers | awk '{print $1}' | sort | uniq -c
+      register: k8s_pods
+      changed_when: false
+
+    - name: Display pods
+      debug:
+        msg: "{{ k8s_pods.stdout_lines }}"
+
+    - name: Get services and ingress
+      shell: |
+        export KUBECONFIG=/etc/rancher/k3s/k3s.yaml
+        echo "=== SERVICES ==="
+        kubectl get svc -A
+        echo ""
+        echo "=== INGRESS ==="
+        kubectl get ingress -A 2>/dev/null || echo "No ingress found"
+      register: k8s_services
+      changed_when: false
+
+    - name: Display services
+      debug:
+        msg: "{{ k8s_services.stdout_lines }}"
+
+    #########################################################################
+    # 4. CONTAINER RUNTIME
+    #########################################################################
+    - name: Check containers
+      shell: |
+        echo "=== RUNNING CONTAINERS ==="
+        k3s crictl ps | head -20
+        echo ""
+        echo "=== CONTAINER COUNT ==="
+        echo "Total: $(k3s crictl ps -q | wc -l)"
+      register: containers
+      changed_when: false
+
+    - name: Display containers
+      debug:
+        msg: "{{ containers.stdout_lines }}"
+
+    #########################################################################
+    # 5. NETWORK
+    #########################################################################
+    - name: Check network
+      shell: |
+        echo "=== NETWORK INTERFACES ==="
+        ip -br addr show
+        echo ""
+        echo "=== LISTENING PORTS ==="
+        ss -tulpn | head -30
+      register: network_info
+      changed_when: false
+
+    - name: Display network
+      debug:
+        msg: "{{ network_info.stdout_lines }}"
