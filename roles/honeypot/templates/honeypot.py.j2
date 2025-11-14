@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""
+Simple Multi-Port Honeypot
+Logs all connection attempts to {{ honeypot_log_file }}
+"""
+
+import socket
+import threading
+import datetime
+import sys
+
+LOG_FILE = "{{ honeypot_log_file }}"
+
+# Port configurations
+PORTS = [
+{% for port_config in honeypot_ports %}
+    {"port": {{ port_config.port }}, "name": "{{ port_config.name }}"},
+{% endfor %}
+]
+
+def log(message):
+    """Log message to file and stdout"""
+    timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    log_message = f"[{timestamp}] {message}"
+    print(log_message)
+    try:
+        with open(LOG_FILE, "a") as f:
+            f.write(log_message + "\n")
+    except Exception as e:
+        print(f"Error writing to log: {e}", file=sys.stderr)
+
+def handle_client(client_socket, client_address, port_name, port_number):
+    """Handle individual client connection"""
+    try:
+        log(f"Connection from {client_address[0]}:{client_address[1]} to {port_name} (port {port_number})")
+        
+        # Send fake banner based on service type
+        if port_name == "SSH":
+            client_socket.send(b"SSH-2.0-OpenSSH_8.9\r\n")
+        elif port_name == "FTP":
+            client_socket.send(b"220 FTP Server ready\r\n")
+        elif port_name == "Telnet":
+            client_socket.send(b"\r\nUbuntu 22.04 LTS\r\nlogin: ")
+        elif port_name == "SMTP":
+            client_socket.send(b"220 mail.example.com ESMTP\r\n")
+        elif port_name == "MySQL":
+            client_socket.send(b"\x00\x00\x00\x0a5.7.0\x00")
+        elif port_name == "PostgreSQL":
+            client_socket.send(b"FATAL: no pg_hba.conf entry\r\n")
+        
+        # Try to receive data (credentials, commands)
+        try:
+            data = client_socket.recv(1024)
+            if data:
+                log(f"Data received from {client_address[0]} on {port_name}: {data[:100]}")
+        except:
+            pass
+            
+    except Exception as e:
+        log(f"Error handling client {client_address[0]} on {port_name}: {str(e)}")
+    finally:
+        try:
+            client_socket.close()
+        except:
+            pass
+
+def listen_on_port(port_number, port_name):
+    """Listen on specific port"""
+    try:
+        server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        server_socket.bind(("", port_number))
+        server_socket.listen(5)
+        
+        log(f"Honeypot started on port {port_number} ({port_name})")
+        
+        while True:
+            try:
+                client_socket, client_address = server_socket.accept()
+                client_thread = threading.Thread(
+                    target=handle_client,
+                    args=(client_socket, client_address, port_name, port_number)
+                )
+                client_thread.daemon = True
+                client_thread.start()
+            except Exception as e:
+                log(f"Error accepting connection on {port_name}: {str(e)}")
+                
+    except Exception as e:
+        log(f"Error starting listener on port {port_number} ({port_name}): {str(e)}")
+
+if __name__ == "__main__":
+    log("=" * 60)
+    log("Multi-Port Honeypot Starting")
+    log("=" * 60)
+    
+    threads = []
+    for port_config in PORTS:
+        thread = threading.Thread(
+            target=listen_on_port,
+            args=(port_config["port"], port_config["name"])
+        )
+        thread.daemon = True
+        thread.start()
+        threads.append(thread)
+    
+    log(f"All honeypot listeners started ({len(PORTS)} ports)")
+    
+    # Keep main thread alive
+    try:
+        for thread in threads:
+            thread.join()
+    except KeyboardInterrupt:
+        log("Honeypot shutting down...")
+        sys.exit(0)

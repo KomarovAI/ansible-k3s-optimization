@@ -1,0 +1,23 @@
+[Unit]
+Description=Multi-Port Honeypot Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory={{ honeypot_install_dir }}
+ExecStart=/usr/bin/python3 {{ honeypot_install_dir }}/honeypot.py
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+# Security settings
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths={{ honeypot_log_file }}
+
+[Install]
+WantedBy=multi-user.target

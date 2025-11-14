@@ -1,0 +1,20 @@
+---
+# Honeypot default configuration
+honeypot_install_dir: /opt/honeypot
+honeypot_log_file: /var/log/honeypot.log
+honeypot_service_enabled: true
+
+# Ports to listen on
+honeypot_ports:
+  - { port: 21, name: 'FTP', protocol: 'tcp' }
+  - { port: 22, name: 'SSH', protocol: 'tcp' }
+  - { port: 23, name: 'Telnet', protocol: 'tcp' }
+  - { port: 25, name: 'SMTP', protocol: 'tcp' }
+  - { port: 110, name: 'POP3', protocol: 'tcp' }
+  - { port: 143, name: 'IMAP', protocol: 'tcp' }
+  - { port: 445, name: 'SMB', protocol: 'tcp' }
+  - { port: 1433, name: 'MSSQL', protocol: 'tcp' }
+  - { port: 3306, name: 'MySQL', protocol: 'tcp' }
+  - { port: 3389, name: 'RDP', protocol: 'tcp' }
+  - { port: 5432, name: 'PostgreSQL', protocol: 'tcp' }
+  - { port: 5900, name: 'VNC', protocol: 'tcp' }

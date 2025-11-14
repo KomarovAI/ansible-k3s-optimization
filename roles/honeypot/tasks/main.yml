@@ -1,0 +1,69 @@
+---
+- name: Install Python dependencies
+  apt:
+    name:
+      - python3
+      - python3-pip
+    state: present
+    update_cache: yes
+
+- name: Create honeypot directory
+  file:
+    path: "{{ honeypot_install_dir }}"
+    state: directory
+    mode: '0755'
+
+- name: Deploy honeypot script
+  template:
+    src: honeypot.py.j2
+    dest: "{{ honeypot_install_dir }}/honeypot.py"
+    mode: '0755'
+  notify: Restart honeypot
+
+- name: Create honeypot systemd service
+  template:
+    src: honeypot.service.j2
+    dest: /etc/systemd/system/honeypot.service
+    mode: '0644'
+  notify:
+    - Reload systemd
+    - Restart honeypot
+
+- name: Enable and start honeypot service
+  systemd:
+    name: honeypot
+    enabled: "{{ honeypot_service_enabled }}"
+    state: started
+    daemon_reload: yes
+
+- name: Configure UFW for honeypot ports
+  ufw:
+    rule: allow
+    port: "{{ item.port }}"
+    proto: "{{ item.protocol }}"
+    comment: "Honeypot {{ item.name }}"
+  loop: "{{ honeypot_ports }}"
+  when: ansible_os_family == "Debian"
+
+- name: Create honeypot log file
+  file:
+    path: "{{ honeypot_log_file }}"
+    state: touch
+    mode: '0644'
+    modification_time: preserve
+    access_time: preserve
+
+- name: Configure logrotate for honeypot
+  copy:
+    content: |
+      {{ honeypot_log_file }} {
+          daily
+          rotate 30
+          compress
+          delaycompress
+          missingok
+          notifempty
+          create 0644 root root
+      }
+    dest: /etc/logrotate.d/honeypot
+    mode: '0644'
