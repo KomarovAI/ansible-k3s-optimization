@@ -1,0 +1,46 @@
+[DEFAULT]
+# Ban time (seconds)
+bantime  = {{ fail2ban_bantime }}
+
+# Time window to count failures
+findtime = {{ fail2ban_findtime }}
+
+# Number of failures before ban
+maxretry = {{ fail2ban_maxretry }}
+
+# Email configuration
+destemail = {{ fail2ban_destemail }}
+sender = {{ fail2ban_sender }}
+mta = {{ fail2ban_mta }}
+action = %(action_)s
+
+# Backend
+backend = systemd
+
+#
+# JAILS
+#
+
+{% if fail2ban_ssh_enabled %}
+[sshd]
+enabled  = true
+port     = {{ fail2ban_ssh_port }}
+logpath  = /var/log/auth.log
+maxretry = {{ fail2ban_ssh_maxretry }}
+bantime  = {{ fail2ban_bantime }}
+findtime = {{ fail2ban_findtime }}
+filter   = sshd
+{% endif %}
+
+{% if fail2ban_honeypot_enabled %}
+[honeypot]
+enabled  = true
+port     = 21,22,23,25,110,143,445,1433,3306,3389,5432,5900
+logpath  = {{ fail2ban_honeypot_log }}
+maxretry = {{ fail2ban_honeypot_maxretry }}
+bantime  = {{ fail2ban_bantime }}
+findtime = {{ fail2ban_findtime }}
+filter   = honeypot
+{% endif %}
+
+# Additional jails can be added here

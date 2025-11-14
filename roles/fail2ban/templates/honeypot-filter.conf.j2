@@ -1,0 +1,12 @@
+# Fail2Ban filter for honeypot
+# Matches connection attempts logged by honeypot.py
+
+[Definition]
+
+# Match honeypot connection logs
+# Example: [2025-11-15 02:39:45] Connection from 192.168.1.100:12345 to SSH (port 22)
+failregex = ^\[.*\] Connection from <HOST>:\d+ to .* \(port \d+\)$
+
+# Ignore localhost
+ignoreregex = ^\[.*\] Connection from 127\.0\.0\.1:\d+
+              ^\[.*\] Connection from ::1:\d+

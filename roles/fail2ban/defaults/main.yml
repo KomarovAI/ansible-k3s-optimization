@@ -1,0 +1,21 @@
+---
+# Fail2ban default configuration
+fail2ban_bantime: 86400  # 24 hours
+fail2ban_findtime: 3600  # 1 hour
+fail2ban_maxretry: 3
+
+# SSH configuration
+fail2ban_ssh_port: 27015
+fail2ban_ssh_enabled: true
+fail2ban_ssh_maxretry: 3
+
+# Honeypot configuration
+fail2ban_honeypot_enabled: true
+fail2ban_honeypot_maxretry: 1  # Ban immediately
+fail2ban_honeypot_log: /var/log/honeypot.log
+
+# Email notifications (optional)
+fail2ban_destemail: root@localhost
+fail2ban_sender: fail2ban@localhost
+fail2ban_mta: sendmail
+fail2ban_action: action_mwl  # Mail with logs

@@ -1,0 +1,41 @@
+---
+- name: Install fail2ban
+  apt:
+    name:
+      - fail2ban
+      - iptables
+      - ipset
+    state: present
+    update_cache: yes
+
+- name: Create fail2ban filter directory
+  file:
+    path: /etc/fail2ban/filter.d
+    state: directory
+    mode: '0755'
+
+- name: Deploy honeypot filter
+  template:
+    src: honeypot-filter.conf.j2
+    dest: /etc/fail2ban/filter.d/honeypot.conf
+    mode: '0644'
+  notify: Restart fail2ban
+
+- name: Deploy jail.local configuration
+  template:
+    src: jail.local.j2
+    dest: /etc/fail2ban/jail.local
+    mode: '0644'
+  notify: Restart fail2ban
+
+- name: Enable and start fail2ban service
+  systemd:
+    name: fail2ban
+    enabled: yes
+    state: started
+
+- name: Create fail2ban log directory
+  file:
+    path: /var/log/fail2ban
+    state: directory
+    mode: '0755'
