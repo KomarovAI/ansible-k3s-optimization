@@ -1,0 +1,22 @@
+# Ansible
+logs/
+*.retry
+*.log
+/tmp/
+__pycache__/
+*.pyc
+
+# Secrets
+vault-password.txt
+*.key
+*.pem
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
