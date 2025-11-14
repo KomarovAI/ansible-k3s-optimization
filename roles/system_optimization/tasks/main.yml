@@ -1,0 +1,68 @@
+---
+- name: Load required kernel modules
+  modprobe:
+    name: "{{ item }}"
+    state: present
+  loop:
+    - overlay
+    - br_netfilter
+    - nf_conntrack
+    - zram
+
+- name: Ensure kernel modules load on boot
+  copy:
+    content: |
+      overlay
+      br_netfilter
+      nf_conntrack
+      zram
+    dest: /etc/modules-load.d/k3s.conf
+    mode: '0644'
+
+- name: Apply kernel parameters
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+    sysctl_file: /etc/sysctl.d/99-k3s-optimization.conf
+  loop: "{{ kernel_params | dict2items }}"
+
+- name: Configure system limits
+  pam_limits:
+    domain: '*'
+    limit_type: "{{ item.type }}"
+    limit_item: "{{ item.item }}"
+    value: "{{ item.value }}"
+  loop:
+    - { type: 'soft', item: 'nofile', value: "{{ system_nofile_soft }}" }
+    - { type: 'hard', item: 'nofile', value: "{{ system_nofile_hard }}" }
+    - { type: 'soft', item: 'nproc', value: "{{ system_nproc_soft }}" }
+    - { type: 'hard', item: 'nproc', value: "{{ system_nproc_hard }}" }
+
+- name: Install zram-tools
+  apt:
+    name: zram-tools
+    state: present
+  when: ansible_os_family == 'Debian'
+
+- name: Configure zram
+  lineinfile:
+    path: /etc/default/zramswap
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    create: yes
+  loop:
+    - { regexp: '^ALGO=', line: 'ALGO={{ zram_compression }}' }
+    - { regexp: '^PERCENT=', line: 'PERCENT=25' }
+  when: ansible_os_family == 'Debian'
+  notify: Restart zram
+
+- name: Install monitoring tools
+  apt:
+    name:
+      - htop
+      - iotop
+      - nethogs
+      - sysstat
+    state: present

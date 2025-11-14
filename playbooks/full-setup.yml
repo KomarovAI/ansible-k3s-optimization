@@ -1,0 +1,31 @@
+---
+- name: Complete K3s Node Setup and Hardening
+  hosts: localhost
+  connection: local
+  become: yes
+  gather_facts: yes
+
+  roles:
+    - system_optimization
+    - ssh_security
+    - fail2ban
+    - honeypot
+
+  post_tasks:
+    - name: Display completion message
+      debug:
+        msg: |
+          ╔════════════════════════════════════════════════════════════════╗
+          ║  ✅ K3s Node Setup Complete!                                   ║
+          ║                                                                ║
+          ║  Applied configurations:                                       ║
+          ║  • System optimization (kernel, zram, limits)                ║
+          ║  • SSH hardening (port {{ ssh_port }})                          ║
+          ║  • Fail2ban with honeypot jail                               ║
+          ║  • Multi-port honeypot deployment                            ║
+          ║                                                                ║
+          ║  Next steps:                                                   ║
+          ║  1. Test SSH: ssh -p {{ ssh_port }} user@host                    ║
+          ║  2. Check health: /usr/local/bin/k3s-health-check             ║
+          ║  3. Monitor: tail -f /var/log/honeypot.log                    ║
+          ╚════════════════════════════════════════════════════════════════╝
