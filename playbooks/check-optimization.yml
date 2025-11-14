@@ -1,0 +1,67 @@
+---
+- name: Check Node Optimization Status
+  hosts: localhost
+  connection: local
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Check zram status
+      shell: cat /proc/swaps | grep zram
+      register: zram_status
+      changed_when: false
+      failed_when: false
+
+    - name: Check sysctl parameters
+      shell: sysctl {{ item }}
+      loop:
+        - vm.swappiness
+        - net.core.somaxconn
+        - net.ipv4.ip_forward
+        - fs.file-max
+        - net.netfilter.nf_conntrack_max
+      register: sysctl_check
+      changed_when: false
+
+    - name: Check system limits
+      shell: |
+        echo "File descriptors: $(ulimit -n)"
+        echo "Max processes: $(ulimit -u)"
+      register: limits_check
+      changed_when: false
+
+    - name: Check loaded kernel modules
+      shell: lsmod | grep -E 'overlay|br_netfilter|nf_conntrack|zram'
+      register: modules_check
+      changed_when: false
+
+    - name: Check K3s service
+      shell: systemctl is-active k3s
+      register: k3s_check
+      changed_when: false
+      failed_when: false
+
+    - name: Display optimization status
+      debug:
+        msg: |
+          ════════════════════════════════════════════════════════
+          📊 NODE OPTIMIZATION STATUS
+          ════════════════════════════════════════════════════════
+          
+          Zram Swap:
+          {{ zram_status.stdout }}
+          
+          Sysctl Parameters:
+          {% for item in sysctl_check.results %}
+          {{ item.stdout }}
+          {% endfor %}
+          
+          System Limits:
+          {{ limits_check.stdout }}
+          
+          Loaded Modules:
+          {{ modules_check.stdout }}
+          
+          K3s Service: {{ k3s_check.stdout }}
+          
+          ════════════════════════════════════════════════════════

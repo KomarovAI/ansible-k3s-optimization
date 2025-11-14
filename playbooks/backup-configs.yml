@@ -1,0 +1,76 @@
+---
+- name: Backup K3s and System Configurations
+  hosts: localhost
+  connection: local
+  become: yes
+
+  vars:
+    backup_dir: "/root/k3s-backups/{{ ansible_date_time.date }}"
+
+  tasks:
+    - name: Create backup directory
+      file:
+        path: "{{ backup_dir }}"
+        state: directory
+        mode: '0700'
+
+    - name: Backup K3s config
+      copy:
+        src: "{{ item }}"
+        dest: "{{ backup_dir }}/"
+        remote_src: yes
+      loop:
+        - /etc/rancher/k3s/config.yaml
+        - /etc/rancher/k3s/k3s.yaml
+      failed_when: false
+
+    - name: Backup etcd snapshots
+      shell: |
+        if [ -d /var/lib/rancher/k3s/server/db/snapshots ]; then
+          cp -r /var/lib/rancher/k3s/server/db/snapshots {{ backup_dir }}/
+        fi
+      failed_when: false
+
+    - name: Backup sysctl config
+      copy:
+        src: "{{ item }}"
+        dest: "{{ backup_dir }}/"
+        remote_src: yes
+      loop:
+        - /etc/sysctl.d/99-k3s-optimization.conf
+        - /etc/modules-load.d/k3s.conf
+      failed_when: false
+
+    - name: Backup SSH config
+      copy:
+        src: /etc/ssh/sshd_config
+        dest: "{{ backup_dir }}/sshd_config"
+        remote_src: yes
+      failed_when: false
+
+    - name: Backup UFW rules
+      shell: |
+        ufw status numbered > {{ backup_dir }}/ufw-rules.txt
+        iptables-save > {{ backup_dir }}/iptables-rules.txt
+      failed_when: false
+
+    - name: Backup fail2ban config
+      shell: |
+        if [ -d /etc/fail2ban ]; then
+          cp -r /etc/fail2ban {{ backup_dir }}/
+        fi
+      failed_when: false
+
+    - name: Create tar archive
+      archive:
+        path: "{{ backup_dir }}"
+        dest: "/root/k3s-backup-{{ ansible_date_time.date }}.tar.gz"
+        format: gz
+
+    - name: Display backup location
+      debug:
+        msg: |
+          ✅ Backup created successfully!
+          
+          Location: /root/k3s-backup-{{ ansible_date_time.date }}.tar.gz
+          Directory: {{ backup_dir }}
