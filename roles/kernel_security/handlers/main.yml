@@ -3,3 +3,12 @@
   systemd:
     name: apparmor
     state: reloaded
+
+- name: Save iptables rules
+  shell: |
+    mkdir -p /etc/iptables
+    iptables-save > /etc/iptables/rules.v4
+  changed_when: false
+  tags:
+    - iptables
+    - firewall
