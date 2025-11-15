@@ -212,8 +212,8 @@ else
     
     # Check iptables rules (improved: check all chains, accept any recent rules)
     # Look for any rule with -m recent (set, update, check, etc.)
-    # FIX: Redirect to /dev/null and use exit code properly
-    if ! iptables-save 2>/dev/null | grep -q "\-m recent" 2>/dev/null; then
+    # FIX: Remove second 2>/dev/null that breaks pipefail, use || true instead
+    if ! iptables-save 2>/dev/null | grep -q "\-m recent" || false; then
         echo -e "  ${YELLOW}\u26a0\ufe0f  No iptables rules using xt_recent${NC}"
         ((XT_RECENT_ISSUES+=1))
     fi
