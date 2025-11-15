@@ -42,6 +42,7 @@
         reject_with: tcp-reset
         comment: "Limit {{ conntrack_limit_per_ip }} connections per IP"
         state: present
+      notify: Save iptables rules
 
     - name: Limit new connections per IP (rate limiting)
       iptables:
@@ -55,11 +56,7 @@
         jump: ACCEPT
         comment: "Rate limit new connections"
         state: present
-
-- name: Save iptables rules
-  shell: |
-    iptables-save > /etc/iptables/rules.v4
-  changed_when: false
+      notify: Save iptables rules
 
 #########################################################################
 # 3. APPARMOR - Container Security
