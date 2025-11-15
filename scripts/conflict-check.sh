@@ -172,8 +172,7 @@ else
         if ipset list -n 2>/dev/null | grep -q "^$set$"; then
             # Check in all iptables chains (INPUT, FORWARD, custom chains)
             # Look for: -m set --match-set <setname>
-            # FIX: Add || true to prevent set -e from exiting on grep non-match
-            if ! iptables-save 2>/dev/null | grep -q "\-\-match-set $set" || true; then
+            if ! iptables-save 2>/dev/null | grep -q "\-\-match-set $set"; then
                 # Double check with flexible pattern
                 if ! iptables-save 2>/dev/null | grep -E "match-set.*$set|$set.*src|$set.*dst" >/dev/null 2>&1; then
                     echo -e "  ${YELLOW}\u26a0\ufe0f  ipset $set exists but not used in iptables${NC}"
@@ -212,8 +211,8 @@ else
     
     # Check iptables rules (improved: check all chains, accept any recent rules)
     # Look for any rule with -m recent (set, update, check, etc.)
-    # FIX: Remove second 2>/dev/null that breaks pipefail, use || true instead
-    if ! iptables-save 2>/dev/null | grep -q "\-m recent" || false; then
+    # FIX: Simple negation works correctly, removed || false that breaks precedence
+    if ! iptables-save 2>/dev/null | grep -q "\-m recent"; then
         echo -e "  ${YELLOW}\u26a0\ufe0f  No iptables rules using xt_recent${NC}"
         ((XT_RECENT_ISSUES+=1))
     fi
