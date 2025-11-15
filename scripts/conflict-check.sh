@@ -45,7 +45,7 @@ fi
 echo -e "${BLUE}[2/9] Checking sysctl...${NC}"
 SYSCTL_CONFLICTS=0
 for param in net.netfilter.nf_conntrack_max net.ipv4.tcp_max_syn_backlog net.ipv4.tcp_syncookies; do
-    COUNT=$(grep -rl "^${param}" /etc/sysctl.d/*.conf 2>/dev/null | wc -l)
+    COUNT=$(grep -rl "^${param}" /etc/sysctl.d/*.conf 2>/dev/null | wc -l || true)
     if [ $COUNT -gt 1 ]; then
         echo -e "  ${YELLOW}⚠️  $param defined in $COUNT files${NC}"
         ((SYSCTL_CONFLICTS++))
@@ -66,7 +66,7 @@ echo -e "${BLUE}[3/9] Checking ports...${NC}"
 HONEYPOT_CONFLICTS=0
 honeypot_ports="21 22 23 25 110 143 3306 3389 5432"
 for port in $honeypot_ports; do
-    real_service=$(netstat -tlnp 2>/dev/null | grep ":$port " | grep -v honeypot | awk '{print $7}' | head -1)
+    real_service=$(netstat -tlnp 2>/dev/null | grep ":$port " | grep -v honeypot | awk '{print $7}' | head -1 || true)
     if [ -n "$real_service" ]; then
         echo -e "  ${RED}❌ Port $port: honeypot conflicts with $real_service${NC}"
         ((HONEYPOT_CONFLICTS++))
@@ -213,46 +213,46 @@ echo -e "${BLUE}[8/9] Checking ARPwatch...${NC}"
 ARPWATCH_ISSUES=0
 
 # Detect main interface
-MAIN_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+MAIN_IFACE=$(ip route | grep default | awk '{print $5}' | head -1 || true)
 
 if [ -z "$MAIN_IFACE" ]; then
     echo -e "  ${YELLOW}⚠️  Could not detect main interface${NC}"
     ((ARPWATCH_ISSUES++))
 else
     # Check if ARPwatch service exists
-    if ! systemctl list-unit-files | grep -q "arpwatch-${MAIN_IFACE}.service"; then
+    if ! systemctl list-unit-files 2>/dev/null | grep -q "arpwatch-${MAIN_IFACE}.service"; then
         echo -e "  ${YELLOW}⚠️  ARPwatch not configured for ${MAIN_IFACE}${NC}"
         ((ARPWATCH_ISSUES++))
     else
         # Check if active
         if ! systemctl is-active arpwatch-${MAIN_IFACE} &>/dev/null; then
             echo -e "  ${RED}❌ arpwatch-${MAIN_IFACE}: inactive${NC}"
-            ((ARPWATCH_ISSUES+=2)
+            ((ARPWATCH_ISSUES+=2))
         else
             # Check for MAC address changes (MITM attacks)
             MAC_CHANGES=$(journalctl -u arpwatch-${MAIN_IFACE} --since "1 hour ago" 2>/dev/null | grep -c "changed ethernet" || echo 0)
             if [ $MAC_CHANGES -gt 0 ]; then
                 echo -e "  ${RED}🚨 MAC ADDRESS CHANGES: $MAC_CHANGES in last hour (MITM ATTACK?)${NC}"
-                ((ARPWATCH_ISSUES+=2)
+                ((ARPWATCH_ISSUES+=2))
             fi
         fi
     fi
     
     # Check cni0 if exists
     if ip link show cni0 &>/dev/null; then
-        if ! systemctl list-unit-files | grep -q "arpwatch-cni0.service"; then
+        if ! systemctl list-unit-files 2>/dev/null | grep -q "arpwatch-cni0.service"; then
             echo -e "  ${YELLOW}⚠️  ARPwatch not configured for cni0${NC}"
             ((ARPWATCH_ISSUES++))
         else
             if ! systemctl is-active arpwatch-cni0 &>/dev/null; then
                 echo -e "  ${RED}❌ arpwatch-cni0: inactive${NC}"
-                ((ARPWATCH_ISSUES+=2)
+                ((ARPWATCH_ISSUES+=2))
             else
                 # Check for pod MAC spoofing
                 POD_MAC_CHANGES=$(journalctl -u arpwatch-cni0 --since "1 hour ago" 2>/dev/null | grep -c "changed ethernet" || echo 0)
                 if [ $POD_MAC_CHANGES -gt 0 ]; then
                     echo -e "  ${RED}🚨 POD MAC SPOOFING: $POD_MAC_CHANGES changes (MALICIOUS POD?)${NC}"
-                    ((ARPWATCH_ISSUES+=2)
+                    ((ARPWATCH_ISSUES+=2))
                 fi
             fi
         fi
