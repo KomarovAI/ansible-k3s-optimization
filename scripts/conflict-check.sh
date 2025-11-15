@@ -28,7 +28,7 @@ echo ""
 #########################################################################
 # 1. IPTABLES CONFLICTS
 #########################################################################
-echo -e "${BLUE}[1/8] Checking iptables...${NC}"
+echo -e "${BLUE}[1/9] Checking iptables...${NC}"
 DUPS=$(iptables -S 2>/dev/null | sort | uniq -d | wc -l)
 if [ $DUPS -gt 0 ]; then
     echo -e "  ${RED}❌ Found $DUPS duplicate iptables rules${NC}"
@@ -42,7 +42,7 @@ fi
 #########################################################################
 # 2. SYSCTL CONFLICTS
 #########################################################################
-echo -e "${BLUE}[2/8] Checking sysctl...${NC}"
+echo -e "${BLUE}[2/9] Checking sysctl...${NC}"
 SYSCTL_CONFLICTS=0
 for param in net.netfilter.nf_conntrack_max net.ipv4.tcp_max_syn_backlog net.ipv4.tcp_syncookies; do
     COUNT=$(grep -rl "^${param}" /etc/sysctl.d/*.conf 2>/dev/null | wc -l)
@@ -62,7 +62,7 @@ fi
 #########################################################################
 # 3. PORT CONFLICTS
 #########################################################################
-echo -e "${BLUE}[3/8] Checking ports...${NC}"
+echo -e "${BLUE}[3/9] Checking ports...${NC}"
 HONEYPOT_CONFLICTS=0
 honeypot_ports="21 22 23 25 110 143 3306 3389 5432"
 for port in $honeypot_ports; do
@@ -83,9 +83,9 @@ fi
 #########################################################################
 # 4. SYSTEMD SERVICES
 #########################################################################
-echo -e "${BLUE}[4/8] Checking services...${NC}"
+echo -e "${BLUE}[4/9] Checking services...${NC}"
 SERVICE_FAILURES=0
-for service in fail2ban psad arpwatch-eth0 arpwatch-cni0 honeypot; do
+for service in fail2ban psad honeypot; do
     if systemctl is-enabled $service &>/dev/null; then
         if ! systemctl is-active $service &>/dev/null; then
             echo -e "  ${RED}❌ $service: $(systemctl is-active $service)${NC}"
@@ -104,7 +104,7 @@ fi
 #########################################################################
 # 5. KERNEL MODULES
 #########################################################################
-echo -e "${BLUE}[5/8] Checking kernel modules...${NC}"
+echo -e "${BLUE}[5/9] Checking kernel modules...${NC}"
 MODULE_ISSUES=0
 
 # Check conflicting modules
@@ -135,7 +135,7 @@ fi
 #########################################################################
 # 6. IPSET
 #########################################################################
-echo -e "${BLUE}[6/8] Checking ipset...${NC}"
+echo -e "${BLUE}[6/9] Checking ipset...${NC}"
 IPSET_ISSUES=0
 
 # Check if ipset is installed
@@ -172,7 +172,7 @@ fi
 #########################################################################
 # 7. XT_RECENT
 #########################################################################
-echo -e "${BLUE}[7/8] Checking xt_recent...${NC}"
+echo -e "${BLUE}[7/9] Checking xt_recent...${NC}"
 XT_RECENT_ISSUES=0
 
 # Check if module loaded
@@ -207,9 +207,71 @@ else
 fi
 
 #########################################################################
-# 8. RESOURCE USAGE
+# 8. ARPWATCH
 #########################################################################
-echo -e "${BLUE}[8/8] Checking resources...${NC}"
+echo -e "${BLUE}[8/9] Checking ARPwatch...${NC}"
+ARPWATCH_ISSUES=0
+
+# Detect main interface
+MAIN_IFACE=$(ip route | grep default | awk '{print $5}' | head -1)
+
+if [ -z "$MAIN_IFACE" ]; then
+    echo -e "  ${YELLOW}⚠️  Could not detect main interface${NC}"
+    ((ARPWATCH_ISSUES++))
+else
+    # Check if ARPwatch service exists
+    if ! systemctl list-unit-files | grep -q "arpwatch-${MAIN_IFACE}.service"; then
+        echo -e "  ${YELLOW}⚠️  ARPwatch not configured for ${MAIN_IFACE}${NC}"
+        ((ARPWATCH_ISSUES++))
+    else
+        # Check if active
+        if ! systemctl is-active arpwatch-${MAIN_IFACE} &>/dev/null; then
+            echo -e "  ${RED}❌ arpwatch-${MAIN_IFACE}: inactive${NC}"
+            ((ARPWATCH_ISSUES+=2)
+        else
+            # Check for MAC address changes (MITM attacks)
+            MAC_CHANGES=$(journalctl -u arpwatch-${MAIN_IFACE} --since "1 hour ago" 2>/dev/null | grep -c "changed ethernet" || echo 0)
+            if [ $MAC_CHANGES -gt 0 ]; then
+                echo -e "  ${RED}🚨 MAC ADDRESS CHANGES: $MAC_CHANGES in last hour (MITM ATTACK?)${NC}"
+                ((ARPWATCH_ISSUES+=2)
+            fi
+        fi
+    fi
+    
+    # Check cni0 if exists
+    if ip link show cni0 &>/dev/null; then
+        if ! systemctl list-unit-files | grep -q "arpwatch-cni0.service"; then
+            echo -e "  ${YELLOW}⚠️  ARPwatch not configured for cni0${NC}"
+            ((ARPWATCH_ISSUES++))
+        else
+            if ! systemctl is-active arpwatch-cni0 &>/dev/null; then
+                echo -e "  ${RED}❌ arpwatch-cni0: inactive${NC}"
+                ((ARPWATCH_ISSUES+=2)
+            else
+                # Check for pod MAC spoofing
+                POD_MAC_CHANGES=$(journalctl -u arpwatch-cni0 --since "1 hour ago" 2>/dev/null | grep -c "changed ethernet" || echo 0)
+                if [ $POD_MAC_CHANGES -gt 0 ]; then
+                    echo -e "  ${RED}🚨 POD MAC SPOOFING: $POD_MAC_CHANGES changes (MALICIOUS POD?)${NC}"
+                    ((ARPWATCH_ISSUES+=2)
+                fi
+            fi
+        fi
+    fi
+fi
+
+if [ $ARPWATCH_ISSUES -gt 1 ]; then
+    ((ERRORS++))
+elif [ $ARPWATCH_ISSUES -gt 0 ]; then
+    ((WARNINGS++))
+else
+    echo -e "  ${GREEN}✅ ARPwatch monitoring active${NC}"
+    ((OK++))
+fi
+
+#########################################################################
+# 9. RESOURCE USAGE
+#########################################################################
+echo -e "${BLUE}[9/9] Checking resources...${NC}"
 RESOURCE_CRITICAL=0
 RESOURCE_HIGH=0
 
@@ -250,7 +312,7 @@ echo -e "${BLUE}================================================================
 echo -e "${BLUE}SUMMARY${NC}"
 echo -e "${BLUE}======================================================================${NC}"
 echo ""
-echo -e "  ${GREEN}✅ OK:       $OK/8 checks passed${NC}"
+echo -e "  ${GREEN}✅ OK:       $OK/9 checks passed${NC}"
 if [ $WARNINGS -gt 0 ]; then
     echo -e "  ${YELLOW}⚠️  WARNINGS: $WARNINGS issues found${NC}"
 fi
