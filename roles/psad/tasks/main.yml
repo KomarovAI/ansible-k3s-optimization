@@ -1,0 +1,65 @@
+---
+- name: Install PSAD
+  apt:
+    name:
+      - psad
+      - iptables-persistent
+    state: present
+    update_cache: yes
+
+- name: Deploy PSAD configuration
+  template:
+    src: psad.conf.j2
+    dest: /etc/psad/psad.conf
+    mode: '0600'
+  notify: Restart psad
+
+- name: Configure iptables logging for PSAD
+  block:
+    - name: Add INPUT chain logging
+      iptables:
+        chain: INPUT
+        jump: LOG
+        log_prefix: '[PSAD INPUT] '
+        log_level: info
+        state: present
+      
+    - name: Add FORWARD chain logging
+      iptables:
+        chain: FORWARD
+        jump: LOG
+        log_prefix: '[PSAD FORWARD] '
+        log_level: info
+        state: present
+
+- name: Save iptables rules
+  shell: |
+    iptables-save > /etc/iptables/rules.v4
+  changed_when: false
+
+- name: Update PSAD signatures
+  command: psad --sig-update
+  changed_when: false
+  failed_when: false
+
+- name: Enable and start PSAD service
+  systemd:
+    name: psad
+    enabled: yes
+    state: started
+
+- name: Create PSAD log directory
+  file:
+    path: /var/log/psad
+    state: directory
+    mode: '0755'
+
+- name: Display PSAD status
+  debug:
+    msg: |
+      ✅ PSAD installed and configured!
+      
+      Check status: psad --Status
+      View analysis: psad --Analyze
+      Logs: tail -f /var/log/psad/psadfifo
+      Email alerts: {{ psad_email_addresses }}

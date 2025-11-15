@@ -1,0 +1,16 @@
+---
+# PSAD (Port Scan Attack Detector) configuration
+psad_email_addresses: root@localhost
+psad_hostname: k3s-master
+psad_enable_auto_ids: Y
+psad_auto_ids_danger_level: 4
+psad_auto_block_timeout: 86400  # 24 hours
+psad_danger_level1: 5
+psad_danger_level2: 100
+psad_danger_level3: 500
+psad_danger_level4: 1500
+psad_danger_level5: 5000
+psad_port_range_scan_threshold: 2
+psad_enable_persistence: Y
+psad_enable_psadwatchd: Y
+psad_enable_syslog: Y

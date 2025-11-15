@@ -1,0 +1,5 @@
+---
+- name: Restart psad
+  systemd:
+    name: psad
+    state: restarted
