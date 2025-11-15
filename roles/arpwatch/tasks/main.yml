@@ -6,67 +6,114 @@
     state: present
     update_cache: yes
 
-- name: Create ARPwatch systemd services for each interface
+- name: Detect main network interface
+  shell: ip route | grep default | awk '{print $5}' | head -1
+  register: main_interface_result
+  changed_when: false
+
+- name: Set main interface fact
+  set_fact:
+    main_interface: "{{ main_interface_result.stdout }}"
+
+- name: Check if cni0 interface exists
+  shell: ip link show cni0
+  register: cni0_exists
+  failed_when: false
+  changed_when: false
+
+- name: Build interface list
+  set_fact:
+    arpwatch_interfaces_auto:
+      - name: "{{ main_interface }}"
+        data_file: "/var/lib/arpwatch/arp-{{ main_interface }}.dat"
+        flags: "-a"
+
+- name: Add cni0 to interface list if exists
+  set_fact:
+    arpwatch_interfaces_auto: "{{ arpwatch_interfaces_auto + [{'name': 'cni0', 'data_file': '/var/lib/arpwatch/arp-cni0.dat', 'flags': ''}] }}"
+  when: cni0_exists.rc == 0
+
+- name: Ensure ARPwatch data directory exists
+  file:
+    path: /var/lib/arpwatch
+    state: directory
+    mode: '0755'
+    owner: arpwatch
+    group: arpwatch
+
+- name: Create ARPwatch data files
+  file:
+    path: "{{ item.data_file }}"
+    state: touch
+    mode: '0644'
+    owner: arpwatch
+    group: arpwatch
+    modification_time: preserve
+    access_time: preserve
+  loop: "{{ arpwatch_interfaces_auto }}"
+
+- name: Create ARPwatch systemd services
   template:
     content: |
       [Unit]
-      Description=ARPwatch on {{ item.name }}
-      After=network.target
+      Description=ARPwatch for {{ item.name }}
+      After=network-online.target{% if item.name == 'cni0' %} k3s.service{% endif %}
+
+      Wants=network-online.target
 
       [Service]
-      Type=forking
-      ExecStart=/usr/sbin/arpwatch -i {{ item.name }} -f {{ item.log_file }}
-      Restart=always
+      Type=simple
+      ExecStart=/usr/sbin/arpwatch -d {{ item.flags }} -i {{ item.name }} -f {{ item.data_file }}
+      Restart=on-failure
       RestartSec=10
 
       [Install]
       WantedBy=multi-user.target
     dest: /etc/systemd/system/arpwatch-{{ item.name }}.service
     mode: '0644'
-  loop: "{{ arpwatch_interfaces }}"
+  loop: "{{ arpwatch_interfaces_auto }}"
   notify: Reload systemd
 
-- name: Create log files
-  file:
-    path: "{{ item.log_file }}"
-    state: touch
-    mode: '0644'
-    modification_time: preserve
-    access_time: preserve
-  loop: "{{ arpwatch_interfaces }}"
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes
 
 - name: Enable and start ARPwatch services
   systemd:
-    name: arpwatch-{{ item.name }}
+    name: "arpwatch-{{ item.name }}"
     enabled: yes
     state: started
-    daemon_reload: yes
-  loop: "{{ arpwatch_interfaces }}"
+  loop: "{{ arpwatch_interfaces_auto }}"
+  register: arpwatch_start
+  failed_when: false
 
-- name: Configure logrotate for ARPwatch
-  copy:
-    content: |
-      {% for iface in arpwatch_interfaces %}
-      {{ iface.log_file }} {
-          daily
-          rotate 30
-          compress
-          delaycompress
-          missingok
-          notifempty
-          create 0644 root root
-      }
-      {% endfor %}
-    dest: /etc/logrotate.d/arpwatch
-    mode: '0644'
+- name: Wait for ARPwatch to initialize
+  wait_for:
+    timeout: 5
+  when: arpwatch_start is changed
+
+- name: Check ARPwatch service status
+  systemd:
+    name: "arpwatch-{{ item.name }}"
+  loop: "{{ arpwatch_interfaces_auto }}"
+  register: arpwatch_status
 
 - name: Display ARPwatch status
   debug:
     msg: |
-      ✅ ARPwatch installed and monitoring interfaces!
+      ✅ ARPwatch installed and monitoring!
       
-      Interfaces: {{ arpwatch_interfaces | map(attribute='name') | list | join(', ') }}
+      Interfaces monitored:
+      {% for iface in arpwatch_interfaces_auto %}
+      - {{ iface.name }}: {{ iface.data_file }}
+      {% endfor %}
       
-      Check ARP table: arp -an
-      View logs: tail -f /var/log/arpwatch-*.log
-      Database: cat /var/lib/arpwatch/*.dat
+      Commands:
+      - systemctl status arpwatch-{{ main_interface }}
+      {% if cni0_exists.rc == 0 %}
+      - systemctl status arpwatch-cni0
+      {% endif %}
+      - cat {{ arpwatch_interfaces_auto[0].data_file }}
+      - journalctl -u arpwatch-{{ main_interface }} -f
+      
+      Protection: ARP spoofing & MITM detection active!
