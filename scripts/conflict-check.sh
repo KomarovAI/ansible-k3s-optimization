@@ -32,11 +32,11 @@ echo ""
 echo -e "${BLUE}[1/9] Checking iptables...${NC}"
 DUPS=$(iptables -S 2>/dev/null | sort | uniq -d | wc -l)
 if [ $DUPS -gt 0 ]; then
-    echo -e "  ${RED}❌ Found $DUPS duplicate iptables rules${NC}"
+    echo -e "  ${RED}\u274c Found $DUPS duplicate iptables rules${NC}"
     iptables -S | sort | uniq -d | sed 's/^/    /'
     ((ERRORS+=1))
 else
-    echo -e "  ${GREEN}✅ No duplicate rules${NC}"
+    echo -e "  ${GREEN}\u2705 No duplicate rules${NC}"
     ((OK+=1))
 fi
 
@@ -48,7 +48,7 @@ SYSCTL_CONFLICTS=0
 for param in net.netfilter.nf_conntrack_max net.ipv4.tcp_max_syn_backlog net.ipv4.tcp_syncookies; do
     COUNT=$(grep -rl "^${param}" /etc/sysctl.d/*.conf 2>/dev/null | wc -l || true)
     if [ $COUNT -gt 1 ]; then
-        echo -e "  ${YELLOW}⚠️  $param defined in $COUNT files${NC}"
+        echo -e "  ${YELLOW}\u26a0\ufe0f  $param defined in $COUNT files${NC}"
         ((SYSCTL_CONFLICTS+=1))
     fi
 done
@@ -56,7 +56,7 @@ done
 if [ $SYSCTL_CONFLICTS -gt 0 ]; then
     ((WARNINGS+=1))
 else
-    echo -e "  ${GREEN}✅ No sysctl conflicts${NC}"
+    echo -e "  ${GREEN}\u2705 No sysctl conflicts${NC}"
     ((OK+=1))
 fi
 
@@ -82,7 +82,7 @@ for port in $honeypot_ports; do
             
             # Skip if this is the honeypot itself
             if [ "$service_pid" != "$HONEYPOT_PID" ]; then
-                echo -e "  ${RED}❌ Port $port: conflict between honeypot and $service${NC}"
+                echo -e "  ${RED}\u274c Port $port: conflict between honeypot and $service${NC}"
                 ((HONEYPOT_CONFLICTS+=1))
             fi
         fi
@@ -92,7 +92,7 @@ done
 if [ $HONEYPOT_CONFLICTS -gt 0 ]; then
     ((ERRORS+=1))
 else
-    echo -e "  ${GREEN}✅ No honeypot port conflicts${NC}"
+    echo -e "  ${GREEN}\u2705 No honeypot port conflicts${NC}"
     ((OK+=1))
 fi
 
@@ -104,7 +104,7 @@ SERVICE_FAILURES=0
 for service in fail2ban psad honeypot; do
     if systemctl is-enabled $service &>/dev/null; then
         if ! systemctl is-active $service &>/dev/null; then
-            echo -e "  ${RED}❌ $service: $(systemctl is-active $service)${NC}"
+            echo -e "  ${RED}\u274c $service: $(systemctl is-active $service)${NC}"
             ((SERVICE_FAILURES+=1))
         fi
     fi
@@ -113,7 +113,7 @@ done
 if [ $SERVICE_FAILURES -gt 0 ]; then
     ((ERRORS+=1))
 else
-    echo -e "  ${GREEN}✅ All enabled services running${NC}"
+    echo -e "  ${GREEN}\u2705 All enabled services running${NC}"
     ((OK+=1))
 fi
 
@@ -125,14 +125,14 @@ MODULE_ISSUES=0
 
 # Check conflicting modules
 if lsmod | awk '{print $1}' | grep -q '^ipt_recent$' && lsmod | awk '{print $1}' | grep -q '^xt_recent$'; then
-    echo -e "  ${RED}❌ Both ipt_recent and xt_recent loaded (conflict)${NC}"
+    echo -e "  ${RED}\u274c Both ipt_recent and xt_recent loaded (conflict)${NC}"
     ((MODULE_ISSUES+=1))
 fi
 
 # Check required modules (improved: check by module name column)
 for mod in nf_conntrack xt_recent; do
     if ! lsmod | awk '{print $1}' | grep -q "^${mod}$"; then
-        echo -e "  ${YELLOW}⚠️  $mod not loaded${NC}"
+        echo -e "  ${YELLOW}\u26a0\ufe0f  $mod not loaded${NC}"
         ((MODULE_ISSUES+=1))
     fi
 done
@@ -144,25 +144,25 @@ if [ $MODULE_ISSUES -gt 0 ]; then
         ((WARNINGS+=1))
     fi
 else
-    echo -e "  ${GREEN}✅ Kernel modules OK${NC}"
+    echo -e "  ${GREEN}\u2705 Kernel modules OK${NC}"
     ((OK+=1))
 fi
 
 #########################################################################
-# 6. IPSET (SMART USAGE DETECTION)
+# 6. IPSET (SMART USAGE DETECTION - FIXED)
 #########################################################################
 echo -e "${BLUE}[6/9] Checking ipset...${NC}"
 IPSET_ISSUES=0
 
 # Check if ipset is installed
 if ! command -v ipset &>/dev/null; then
-    echo -e "  ${YELLOW}⚠️  ipset not installed${NC}"
+    echo -e "  ${YELLOW}\u26a0\ufe0f  ipset not installed${NC}"
     ((IPSET_ISSUES+=1))
 else
     # Check required sets
     for set in blacklist fail2ban-sshd fail2ban-honeypot; do
         if ! ipset list -n 2>/dev/null | grep -q "^$set$"; then
-            echo -e "  ${YELLOW}⚠️  Missing ipset: $set${NC}"
+            echo -e "  ${YELLOW}\u26a0\ufe0f  Missing ipset: $set${NC}"
             ((IPSET_ISSUES+=1))
         fi
     done
@@ -172,9 +172,13 @@ else
         if ipset list -n 2>/dev/null | grep -q "^$set$"; then
             # Check in all iptables chains (INPUT, FORWARD, custom chains)
             # Look for: -m set --match-set <setname>
-            if ! iptables-save 2>/dev/null | grep -q "\-m set.*\-\-match-set $set"; then
-                echo -e "  ${YELLOW}⚠️  ipset $set exists but not used in iptables${NC}"
-                ((IPSET_ISSUES+=1))
+            # FIX: Add || true to prevent set -e from exiting on grep non-match
+            if ! iptables-save 2>/dev/null | grep -q "\-\-match-set $set" || true; then
+                # Double check with flexible pattern
+                if ! iptables-save 2>/dev/null | grep -E "match-set.*$set|$set.*src|$set.*dst" >/dev/null 2>&1; then
+                    echo -e "  ${YELLOW}\u26a0\ufe0f  ipset $set exists but not used in iptables${NC}"
+                    ((IPSET_ISSUES+=1))
+                fi
             fi
         fi
     done
@@ -183,33 +187,34 @@ fi
 if [ $IPSET_ISSUES -gt 0 ]; then
     ((WARNINGS+=1))
 else
-    echo -e "  ${GREEN}✅ ipset configuration OK${NC}"
+    echo -e "  ${GREEN}\u2705 ipset configuration OK${NC}"
     ((OK+=1))
 fi
 
 #########################################################################
-# 7. XT_RECENT (IMPROVED DETECTION)
+# 7. XT_RECENT (IMPROVED DETECTION - FIXED)
 #########################################################################
 echo -e "${BLUE}[7/9] Checking xt_recent...${NC}"
 XT_RECENT_ISSUES=0
 
 # Check if module loaded (improved detection)
 if ! lsmod | awk '{print $1}' | grep -q '^xt_recent$'; then
-    echo -e "  ${RED}❌ xt_recent module not loaded${NC}"
+    echo -e "  ${RED}\u274c xt_recent module not loaded${NC}"
     ((XT_RECENT_ISSUES+=1))
 else
     # Check tracking lists
     for list in ssh_attack portscan; do
         if [ ! -f /proc/net/xt_recent/$list ]; then
-            echo -e "  ${YELLOW}⚠️  xt_recent list '$list' not created${NC}"
+            echo -e "  ${YELLOW}\u26a0\ufe0f  xt_recent list '$list' not created${NC}"
             ((XT_RECENT_ISSUES+=1))
         fi
     done
     
     # Check iptables rules (improved: check all chains, accept any recent rules)
     # Look for any rule with -m recent (set, update, check, etc.)
-    if ! iptables-save 2>/dev/null | grep -q "\-m recent"; then
-        echo -e "  ${YELLOW}⚠️  No iptables rules using xt_recent${NC}"
+    # FIX: Redirect to /dev/null and use exit code properly
+    if ! iptables-save 2>/dev/null | grep -q "\-m recent" 2>/dev/null; then
+        echo -e "  ${YELLOW}\u26a0\ufe0f  No iptables rules using xt_recent${NC}"
         ((XT_RECENT_ISSUES+=1))
     fi
 fi
@@ -221,7 +226,7 @@ if [ $XT_RECENT_ISSUES -gt 0 ]; then
         ((WARNINGS+=1))
     fi
 else
-    echo -e "  ${GREEN}✅ xt_recent working correctly${NC}"
+    echo -e "  ${GREEN}\u2705 xt_recent working correctly${NC}"
     ((OK+=1))
 fi
 
@@ -235,14 +240,14 @@ ARPWATCH_ISSUES=0
 MAIN_IFACE=$(ip route | grep default | awk '{print $5}' | head -1 || true)
 
 if [ -z "$MAIN_IFACE" ]; then
-    echo -e "  ${YELLOW}⚠️  Could not detect main interface${NC}"
+    echo -e "  ${YELLOW}\u26a0\ufe0f  Could not detect main interface${NC}"
     ((ARPWATCH_ISSUES+=1))
 else
     # Check if ANY arpwatch process is monitoring main interface (service OR manual)
     ARPWATCH_MAIN=$(ps aux | grep "[a]rpwatch.*${MAIN_IFACE}" | wc -l || echo 0)
     
     if [ $ARPWATCH_MAIN -eq 0 ]; then
-        echo -e "  ${YELLOW}⚠️  ARPwatch not monitoring ${MAIN_IFACE}${NC}"
+        echo -e "  ${YELLOW}\u26a0\ufe0f  ARPwatch not monitoring ${MAIN_IFACE}${NC}"
         ((ARPWATCH_ISSUES+=1))
     else
         # Check for MAC address changes (MITM attacks) - check all arpwatch services
@@ -257,7 +262,7 @@ else
         done
         
         if [ $MAC_CHANGES -gt 0 ]; then
-            echo -e "  ${RED}🚨 MAC ADDRESS CHANGES: $MAC_CHANGES in last hour (MITM ATTACK?)${NC}"
+            echo -e "  ${RED}\ud83d\udea8 MAC ADDRESS CHANGES: $MAC_CHANGES in last hour (MITM ATTACK?)${NC}"
             ((ARPWATCH_ISSUES+=2))
         fi
     fi
@@ -267,7 +272,7 @@ else
         ARPWATCH_CNI0=$(ps aux | grep "[a]rpwatch.*cni0" | wc -l || echo 0)
         
         if [ $ARPWATCH_CNI0 -eq 0 ]; then
-            echo -e "  ${YELLOW}⚠️  ARPwatch not monitoring cni0${NC}"
+            echo -e "  ${YELLOW}\u26a0\ufe0f  ARPwatch not monitoring cni0${NC}"
             ((ARPWATCH_ISSUES+=1))
         fi
     fi
@@ -278,7 +283,7 @@ if [ $ARPWATCH_ISSUES -gt 1 ]; then
 elif [ $ARPWATCH_ISSUES -gt 0 ]; then
     ((WARNINGS+=1))
 else
-    echo -e "  ${GREEN}✅ ARPwatch monitoring active${NC}"
+    echo -e "  ${GREEN}\u2705 ARPwatch monitoring active${NC}"
     ((OK+=1))
 fi
 
@@ -292,20 +297,20 @@ RESOURCE_HIGH=0
 # Memory
 MEM_PERCENT=$(free | awk '/^Mem:/ {printf "%.0f", $3/$2 * 100}')
 if [ $MEM_PERCENT -gt 90 ]; then
-    echo -e "  ${RED}❌ Memory usage critical: ${MEM_PERCENT}%${NC}"
+    echo -e "  ${RED}\u274c Memory usage critical: ${MEM_PERCENT}%${NC}"
     ((RESOURCE_CRITICAL+=1))
 elif [ $MEM_PERCENT -gt 80 ]; then
-    echo -e "  ${YELLOW}⚠️  Memory usage high: ${MEM_PERCENT}%${NC}"
+    echo -e "  ${YELLOW}\u26a0\ufe0f  Memory usage high: ${MEM_PERCENT}%${NC}"
     ((RESOURCE_HIGH+=1))
 fi
 
 # Disk
 DISK_PERCENT=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
 if [ $DISK_PERCENT -gt 90 ]; then
-    echo -e "  ${RED}❌ Disk usage critical: ${DISK_PERCENT}%${NC}"
+    echo -e "  ${RED}\u274c Disk usage critical: ${DISK_PERCENT}%${NC}"
     ((RESOURCE_CRITICAL+=1))
 elif [ $DISK_PERCENT -gt 80 ]; then
-    echo -e "  ${YELLOW}⚠️  Disk usage high: ${DISK_PERCENT}%${NC}"
+    echo -e "  ${YELLOW}\u26a0\ufe0f  Disk usage high: ${DISK_PERCENT}%${NC}"
     ((RESOURCE_HIGH+=1))
 fi
 
@@ -314,7 +319,7 @@ if [ $RESOURCE_CRITICAL -gt 0 ]; then
 elif [ $RESOURCE_HIGH -gt 0 ]; then
     ((WARNINGS+=1))
 else
-    echo -e "  ${GREEN}✅ Resource usage normal${NC}"
+    echo -e "  ${GREEN}\u2705 Resource usage normal${NC}"
     ((OK+=1))
 fi
 
@@ -326,28 +331,28 @@ echo -e "${BLUE}================================================================
 echo -e "${BLUE}SUMMARY${NC}"
 echo -e "${BLUE}======================================================================${NC}"
 echo ""
-echo -e "  ${GREEN}✅ OK:       $OK/9 checks passed${NC}"
+echo -e "  ${GREEN}\u2705 OK:       $OK/9 checks passed${NC}"
 if [ $WARNINGS -gt 0 ]; then
-    echo -e "  ${YELLOW}⚠️  WARNINGS: $WARNINGS issues found${NC}"
+    echo -e "  ${YELLOW}\u26a0\ufe0f  WARNINGS: $WARNINGS issues found${NC}"
 fi
 if [ $ERRORS -gt 0 ]; then
-    echo -e "  ${RED}❌ ERRORS:   $ERRORS critical issues${NC}"
+    echo -e "  ${RED}\u274c ERRORS:   $ERRORS critical issues${NC}"
 fi
 echo ""
 
 if [ $ERRORS -eq 0 ] && [ $WARNINGS -eq 0 ]; then
-    echo -e "${GREEN}🎉 ALL CHECKS PASSED - NO CONFLICTS DETECTED!${NC}"
+    echo -e "${GREEN}\ud83c\udf89 ALL CHECKS PASSED - NO CONFLICTS DETECTED!${NC}"
     echo ""
     exit 0
 elif [ $ERRORS -gt 0 ]; then
-    echo -e "${RED}🛑 CRITICAL ISSUES DETECTED - IMMEDIATE ACTION REQUIRED${NC}"
+    echo -e "${RED}\ud83d\uded1 CRITICAL ISSUES DETECTED - IMMEDIATE ACTION REQUIRED${NC}"
     echo ""
     echo "Run for detailed diagnostics:"
     echo "  ansible-playbook playbooks/diagnostic-comprehensive.yml"
     echo ""
     exit 1
 else
-    echo -e "${YELLOW}⚠️  WARNINGS FOUND - REVIEW RECOMMENDED${NC}"
+    echo -e "${YELLOW}\u26a0\ufe0f  WARNINGS FOUND - REVIEW RECOMMENDED${NC}"
     echo ""
     echo "Run for detailed diagnostics:"
     echo "  ansible-playbook playbooks/diagnostic-comprehensive.yml"
