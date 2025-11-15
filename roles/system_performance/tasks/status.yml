@@ -1,0 +1,11 @@
+---
+- name: Ensure irqbalance is running and enabled
+  systemd:
+    name: irqbalance
+    state: started
+    enabled: yes
+  register: irqbalance_status
+
+- name: Display irqbalance status
+  debug:
+    msg: "irqbalance status: {{ irqbalance_status.state }} (enabled: {{ irqbalance_status.enabled }})"

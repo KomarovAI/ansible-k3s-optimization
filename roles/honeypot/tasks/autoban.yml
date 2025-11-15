@@ -1,0 +1,21 @@
+---
+# Автобан honeypot IPs через fail2ban
+- name: Create autoban script for honeypot attackers
+  copy:
+    dest: /opt/honeypot/autoban.sh
+    mode: '0755'
+    content: |
+      #!/bin/bash
+      # Автобан атакующих из honeypot логов
+      tail -500 /var/log/honeypot.log | grep "Connection from" | awk '{print $6}' | cut -d':' -f1 | sort | uniq -c | awk '$1 >= 5 {print $2}' | while read IP; do
+          # Проверить не забанен ли уже
+          if ! fail2ban-client status honeypot | grep -q "$IP"; then
+              echo "Banning $IP (honeypot attacks)"
+              fail2ban-client set honeypot banip "$IP"
+          fi
+      done
+- name: Schedule autoban script in cron (every 15min)
+  cron:
+    name: "Autoban honeypot attackers"
+    job: "/opt/honeypot/autoban.sh"
+    minute: "*/15"
