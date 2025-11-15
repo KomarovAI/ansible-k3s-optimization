@@ -33,10 +33,10 @@ DUPS=$(iptables -S 2>/dev/null | sort | uniq -d | wc -l)
 if [ $DUPS -gt 0 ]; then
     echo -e "  ${RED}❌ Found $DUPS duplicate iptables rules${NC}"
     iptables -S | sort | uniq -d | sed 's/^/    /'
-    ((ERRORS++))
+    ((ERRORS+=1))
 else
     echo -e "  ${GREEN}✅ No duplicate rules${NC}"
-    ((OK++))
+    ((OK+=1))
 fi
 
 #########################################################################
@@ -48,15 +48,15 @@ for param in net.netfilter.nf_conntrack_max net.ipv4.tcp_max_syn_backlog net.ipv
     COUNT=$(grep -rl "^${param}" /etc/sysctl.d/*.conf 2>/dev/null | wc -l || true)
     if [ $COUNT -gt 1 ]; then
         echo -e "  ${YELLOW}⚠️  $param defined in $COUNT files${NC}"
-        ((SYSCTL_CONFLICTS++))
+        ((SYSCTL_CONFLICTS+=1))
     fi
 done
 
 if [ $SYSCTL_CONFLICTS -gt 0 ]; then
-    ((WARNINGS++))
+    ((WARNINGS+=1))
 else
     echo -e "  ${GREEN}✅ No sysctl conflicts${NC}"
-    ((OK++))
+    ((OK+=1))
 fi
 
 #########################################################################
@@ -69,15 +69,15 @@ for port in $honeypot_ports; do
     real_service=$(netstat -tlnp 2>/dev/null | grep ":$port " | grep -v honeypot | awk '{print $7}' | head -1 || true)
     if [ -n "$real_service" ]; then
         echo -e "  ${RED}❌ Port $port: honeypot conflicts with $real_service${NC}"
-        ((HONEYPOT_CONFLICTS++))
+        ((HONEYPOT_CONFLICTS+=1))
     fi
 done
 
 if [ $HONEYPOT_CONFLICTS -gt 0 ]; then
-    ((ERRORS++))
+    ((ERRORS+=1))
 else
     echo -e "  ${GREEN}✅ No honeypot port conflicts${NC}"
-    ((OK++))
+    ((OK+=1))
 fi
 
 #########################################################################
@@ -89,16 +89,16 @@ for service in fail2ban psad honeypot; do
     if systemctl is-enabled $service &>/dev/null; then
         if ! systemctl is-active $service &>/dev/null; then
             echo -e "  ${RED}❌ $service: $(systemctl is-active $service)${NC}"
-            ((SERVICE_FAILURES++))
+            ((SERVICE_FAILURES+=1))
         fi
     fi
 done
 
 if [ $SERVICE_FAILURES -gt 0 ]; then
-    ((ERRORS++))
+    ((ERRORS+=1))
 else
     echo -e "  ${GREEN}✅ All enabled services running${NC}"
-    ((OK++))
+    ((OK+=1))
 fi
 
 #########################################################################
@@ -110,26 +110,26 @@ MODULE_ISSUES=0
 # Check conflicting modules
 if lsmod | grep -q ipt_recent && lsmod | grep -q xt_recent; then
     echo -e "  ${RED}❌ Both ipt_recent and xt_recent loaded (conflict)${NC}"
-    ((MODULE_ISSUES++))
+    ((MODULE_ISSUES+=1))
 fi
 
 # Check required modules
 for mod in nf_conntrack xt_recent; do
     if ! lsmod | grep -q "^$mod "; then
         echo -e "  ${YELLOW}⚠️  $mod not loaded${NC}"
-        ((MODULE_ISSUES++))
+        ((MODULE_ISSUES+=1))
     fi
 done
 
 if [ $MODULE_ISSUES -gt 0 ]; then
     if lsmod | grep -q ipt_recent && lsmod | grep -q xt_recent; then
-        ((ERRORS++))
+        ((ERRORS+=1))
     else
-        ((WARNINGS++))
+        ((WARNINGS+=1))
     fi
 else
     echo -e "  ${GREEN}✅ Kernel modules OK${NC}"
-    ((OK++))
+    ((OK+=1))
 fi
 
 #########################################################################
@@ -141,13 +141,13 @@ IPSET_ISSUES=0
 # Check if ipset is installed
 if ! command -v ipset &>/dev/null; then
     echo -e "  ${YELLOW}⚠️  ipset not installed${NC}"
-    ((IPSET_ISSUES++))
+    ((IPSET_ISSUES+=1))
 else
     # Check required sets
     for set in blacklist fail2ban-sshd fail2ban-honeypot; do
         if ! ipset list -n 2>/dev/null | grep -q "^$set$"; then
             echo -e "  ${YELLOW}⚠️  Missing ipset: $set${NC}"
-            ((IPSET_ISSUES++))
+            ((IPSET_ISSUES+=1))
         fi
     done
     
@@ -156,17 +156,17 @@ else
         if ipset list -n 2>/dev/null | grep -q "^$set$"; then
             if ! iptables -S 2>/dev/null | grep -q "match-set $set"; then
                 echo -e "  ${YELLOW}⚠️  ipset $set exists but not used in iptables${NC}"
-                ((IPSET_ISSUES++))
+                ((IPSET_ISSUES+=1))
             fi
         fi
     done
 fi
 
 if [ $IPSET_ISSUES -gt 0 ]; then
-    ((WARNINGS++))
+    ((WARNINGS+=1))
 else
     echo -e "  ${GREEN}✅ ipset configuration OK${NC}"
-    ((OK++))
+    ((OK+=1))
 fi
 
 #########################################################################
@@ -178,32 +178,32 @@ XT_RECENT_ISSUES=0
 # Check if module loaded
 if ! lsmod | grep -q xt_recent; then
     echo -e "  ${RED}❌ xt_recent module not loaded${NC}"
-    ((XT_RECENT_ISSUES++))
+    ((XT_RECENT_ISSUES+=1))
 else
     # Check tracking lists
     for list in ssh_attack portscan; do
         if [ ! -f /proc/net/xt_recent/$list ]; then
             echo -e "  ${YELLOW}⚠️  xt_recent list '$list' not created${NC}"
-            ((XT_RECENT_ISSUES++))
+            ((XT_RECENT_ISSUES+=1))
         fi
     done
     
     # Check iptables rules
     if ! iptables -S 2>/dev/null | grep -q "recent.*ssh_attack"; then
         echo -e "  ${YELLOW}⚠️  No iptables rules using xt_recent${NC}"
-        ((XT_RECENT_ISSUES++))
+        ((XT_RECENT_ISSUES+=1))
     fi
 fi
 
 if [ $XT_RECENT_ISSUES -gt 0 ]; then
     if ! lsmod | grep -q xt_recent; then
-        ((ERRORS++))
+        ((ERRORS+=1))
     else
-        ((WARNINGS++))
+        ((WARNINGS+=1))
     fi
 else
     echo -e "  ${GREEN}✅ xt_recent working correctly${NC}"
-    ((OK++))
+    ((OK+=1))
 fi
 
 #########################################################################
@@ -217,12 +217,12 @@ MAIN_IFACE=$(ip route | grep default | awk '{print $5}' | head -1 || true)
 
 if [ -z "$MAIN_IFACE" ]; then
     echo -e "  ${YELLOW}⚠️  Could not detect main interface${NC}"
-    ((ARPWATCH_ISSUES++))
+    ((ARPWATCH_ISSUES+=1))
 else
     # Check if ARPwatch service exists
     if ! systemctl list-unit-files 2>/dev/null | grep -q "arpwatch-${MAIN_IFACE}.service"; then
         echo -e "  ${YELLOW}⚠️  ARPwatch not configured for ${MAIN_IFACE}${NC}"
-        ((ARPWATCH_ISSUES++))
+        ((ARPWATCH_ISSUES+=1))
     else
         # Check if active
         if ! systemctl is-active arpwatch-${MAIN_IFACE} &>/dev/null; then
@@ -242,7 +242,7 @@ else
     if ip link show cni0 &>/dev/null; then
         if ! systemctl list-unit-files 2>/dev/null | grep -q "arpwatch-cni0.service"; then
             echo -e "  ${YELLOW}⚠️  ARPwatch not configured for cni0${NC}"
-            ((ARPWATCH_ISSUES++))
+            ((ARPWATCH_ISSUES+=1))
         else
             if ! systemctl is-active arpwatch-cni0 &>/dev/null; then
                 echo -e "  ${RED}❌ arpwatch-cni0: inactive${NC}"
@@ -260,12 +260,12 @@ else
 fi
 
 if [ $ARPWATCH_ISSUES -gt 1 ]; then
-    ((ERRORS++))
+    ((ERRORS+=1))
 elif [ $ARPWATCH_ISSUES -gt 0 ]; then
-    ((WARNINGS++))
+    ((WARNINGS+=1))
 else
     echo -e "  ${GREEN}✅ ARPwatch monitoring active${NC}"
-    ((OK++))
+    ((OK+=1))
 fi
 
 #########################################################################
@@ -279,29 +279,29 @@ RESOURCE_HIGH=0
 MEM_PERCENT=$(free | awk '/^Mem:/ {printf "%.0f", $3/$2 * 100}')
 if [ $MEM_PERCENT -gt 90 ]; then
     echo -e "  ${RED}❌ Memory usage critical: ${MEM_PERCENT}%${NC}"
-    ((RESOURCE_CRITICAL++))
+    ((RESOURCE_CRITICAL+=1))
 elif [ $MEM_PERCENT -gt 80 ]; then
     echo -e "  ${YELLOW}⚠️  Memory usage high: ${MEM_PERCENT}%${NC}"
-    ((RESOURCE_HIGH++))
+    ((RESOURCE_HIGH+=1))
 fi
 
 # Disk
 DISK_PERCENT=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
 if [ $DISK_PERCENT -gt 90 ]; then
     echo -e "  ${RED}❌ Disk usage critical: ${DISK_PERCENT}%${NC}"
-    ((RESOURCE_CRITICAL++))
+    ((RESOURCE_CRITICAL+=1))
 elif [ $DISK_PERCENT -gt 80 ]; then
     echo -e "  ${YELLOW}⚠️  Disk usage high: ${DISK_PERCENT}%${NC}"
-    ((RESOURCE_HIGH++))
+    ((RESOURCE_HIGH+=1))
 fi
 
 if [ $RESOURCE_CRITICAL -gt 0 ]; then
-    ((ERRORS++))
+    ((ERRORS+=1))
 elif [ $RESOURCE_HIGH -gt 0 ]; then
-    ((WARNINGS++))
+    ((WARNINGS+=1))
 else
     echo -e "  ${GREEN}✅ Resource usage normal${NC}"
-    ((OK++))
+    ((OK+=1))
 fi
 
 #########################################################################
