@@ -1,0 +1,15 @@
+name: Ansible CI
+on: [push, pull_request]
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Install requirements
+      run: pip install ansible ansible-lint
+    - name: Ansible Lint
+      run: ansible-lint playbooks/
+    - name: Syntax check
+      run: ansible-playbook playbooks/site.yml --syntax-check
+    - name: Dry run
+      run: ansible-playbook playbooks/site.yml --check --diff

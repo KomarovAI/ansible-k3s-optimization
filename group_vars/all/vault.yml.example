@@ -1,0 +1,4 @@
+---
+vault_example_variable: "your-secret-value"
+# Пример использования vault переменных:
+# vault_ssh_private_key, vault_api_token, vault_db_password

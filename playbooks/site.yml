@@ -1,0 +1,5 @@
+---
+# Master orchestrator playbook
+- import_playbook: performance-optimization.yml
+- import_playbook: optimize-node.yml
+- import_playbook: advanced-security.yml
