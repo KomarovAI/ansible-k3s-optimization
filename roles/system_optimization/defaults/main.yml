@@ -29,8 +29,8 @@ kernel_params:
   fs.inotify.max_user_watches: 524288
   fs.inotify.max_user_instances: 512
   
-  # Connection tracking
-  net.netfilter.nf_conntrack_max: 1048576
+  # Connection tracking moved to kernel_security role
+  # net.netfilter.nf_conntrack_max: 1048576  # <- REMOVED to avoid conflict
 
 # Zram configuration
 zram_size_mb: 768
