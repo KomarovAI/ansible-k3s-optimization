@@ -7,26 +7,54 @@
     state: present
     update_cache: yes
 
+- name: Check if ipset blacklist exists
+  shell: ipset list {{ ipset_blacklist_name }} &>/dev/null
+  register: ipset_blacklist_exists
+  failed_when: false
+  changed_when: false
+
 - name: Create ipset blacklist
   shell: |
-    ipset create {{ ipset_blacklist_name }} hash:ip hashsize {{ ipset_hash_size }} maxelem {{ ipset_max_elem }} -exist
+    ipset create {{ ipset_blacklist_name }} hash:ip hashsize {{ ipset_hash_size }} maxelem {{ ipset_max_elem }}
+  when: ipset_blacklist_exists.rc != 0
+
+- name: Check if ipset fail2ban SSH exists
+  shell: ipset list {{ ipset_fail2ban_sshd_name }} &>/dev/null
+  register: ipset_sshd_exists
+  failed_when: false
   changed_when: false
 
 - name: Create ipset for fail2ban SSH jail
   shell: |
-    ipset create {{ ipset_fail2ban_sshd_name }} hash:ip timeout 86400 hashsize {{ ipset_hash_size }} maxelem {{ ipset_max_elem }} -exist
+    ipset create {{ ipset_fail2ban_sshd_name }} hash:ip timeout 86400 hashsize {{ ipset_hash_size }} maxelem {{ ipset_max_elem }}
+  when: ipset_sshd_exists.rc != 0
+
+- name: Check if ipset fail2ban honeypot exists
+  shell: ipset list {{ ipset_fail2ban_honeypot_name }} &>/dev/null
+  register: ipset_honeypot_exists
+  failed_when: false
   changed_when: false
 
 - name: Create ipset for fail2ban honeypot jail
   shell: |
-    ipset create {{ ipset_fail2ban_honeypot_name }} hash:ip timeout 86400 hashsize {{ ipset_hash_size }} maxelem {{ ipset_max_elem }} -exist
+    ipset create {{ ipset_fail2ban_honeypot_name }} hash:ip timeout 86400 hashsize {{ ipset_hash_size }} maxelem {{ ipset_max_elem }}
+  when: ipset_honeypot_exists.rc != 0
+
+- name: Check if IP already in blacklist
+  shell: ipset test {{ ipset_blacklist_name }} {{ item }}
+  loop: "{{ ipset_permanent_blacklist }}"
+  when: ipset_permanent_blacklist | length > 0
+  register: ip_in_blacklist
+  failed_when: false
   changed_when: false
 
 - name: Add permanent blacklist IPs
   shell: |
-    ipset add {{ ipset_blacklist_name }} {{ item }} -exist
-  loop: "{{ ipset_permanent_blacklist }}"
-  when: ipset_permanent_blacklist | length > 0
+    ipset add {{ ipset_blacklist_name }} {{ item.item }}
+  loop: "{{ ip_in_blacklist.results }}"
+  when: 
+    - ipset_permanent_blacklist | length > 0
+    - item.rc != 0
 
 - name: Configure iptables to use ipset blacklist
   iptables:
@@ -36,6 +64,7 @@
     jump: DROP
     comment: "Block IPs from ipset blacklist"
     state: present
+  notify: Save iptables rules
 
 - name: Configure iptables for fail2ban SSH ipset
   iptables:
@@ -45,6 +74,7 @@
     jump: DROP
     comment: "Block fail2ban SSH attackers"
     state: present
+  notify: Save iptables rules
 
 - name: Configure iptables for fail2ban honeypot ipset
   iptables:
@@ -54,11 +84,7 @@
     jump: DROP
     comment: "Block honeypot attackers"
     state: present
-
-- name: Save iptables rules
-  shell: |
-    iptables-save > /etc/iptables/rules.v4
-  changed_when: false
+  notify: Save iptables rules
 
 - name: Save ipset to file
   shell: |
