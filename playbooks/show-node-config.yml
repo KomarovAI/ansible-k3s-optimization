@@ -1,0 +1,373 @@
+---
+- name: Display Complete K3s Node Configuration
+  hosts: k3s_masters
+  become: yes
+  gather_facts: yes
+
+  vars:
+    output_format: "yaml"  # Options: yaml, json, text
+    save_to_file: true
+    config_output_dir: "/tmp/k3s-node-config"
+
+  tasks:
+    # ========================================
+    # 1. SYSTEM INFORMATION
+    # ========================================
+    - name: Gather System Information
+      block:
+        - name: Get system info
+          ansible.builtin.setup:
+            gather_subset:
+              - all
+
+        - name: Display System Information
+          ansible.builtin.debug:
+            msg:
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "           SYSTEM INFORMATION"
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "Hostname: {{ ansible_hostname }}"
+              - "FQDN: {{ ansible_fqdn }}"
+              - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+              - "Kernel: {{ ansible_kernel }}"
+              - "Architecture: {{ ansible_architecture }}"
+              - "CPU Cores: {{ ansible_processor_vcpus }}"
+              - "Total Memory: {{ ansible_memtotal_mb }} MB"
+              - "IP Address: {{ ansible_default_ipv4.address | default('N/A') }}"
+              - "Uptime: {{ ansible_uptime_seconds // 86400 }} days"
+
+    # ========================================
+    # 2. K3S CONFIGURATION
+    # ========================================
+    - name: Gather K3s Configuration
+      block:
+        - name: Get K3s version
+          ansible.builtin.command: k3s --version
+          register: k3s_version
+          changed_when: false
+
+        - name: Read K3s config.yaml
+          ansible.builtin.slurp:
+            src: /etc/rancher/k3s/config.yaml
+          register: k3s_config
+          failed_when: false
+
+        - name: Get K3s service status
+          ansible.builtin.systemd:
+            name: k3s
+          register: k3s_service
+
+        - name: Get K3s process info
+          ansible.builtin.shell: ps aux | grep k3s | grep -v grep
+          register: k3s_process
+          changed_when: false
+
+        - name: Display K3s Configuration
+          ansible.builtin.debug:
+            msg:
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "           K3S CONFIGURATION"
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "K3s Version: {{ k3s_version.stdout }}"
+              - "Service Status: {{ k3s_service.status.ActiveState }}"
+              - "Service Enabled: {{ k3s_service.status.UnitFileState }}"
+              - ""
+              - "Config File (/etc/rancher/k3s/config.yaml):"
+              - "{{ k3s_config.content | b64decode if k3s_config.content is defined else 'Not found' }}"
+
+    # ========================================
+    # 3. KUBERNETES CLUSTER STATE
+    # ========================================
+    - name: Gather Kubernetes Cluster Information
+      block:
+        - name: Get cluster info
+          ansible.builtin.command: kubectl cluster-info
+          register: cluster_info
+          changed_when: false
+
+        - name: Get nodes
+          ansible.builtin.command: kubectl get nodes -o wide
+          register: k8s_nodes
+          changed_when: false
+
+        - name: Get node details
+          ansible.builtin.command: kubectl describe node {{ ansible_hostname }}
+          register: node_details
+          changed_when: false
+
+        - name: Get all namespaces
+          ansible.builtin.command: kubectl get namespaces
+          register: k8s_namespaces
+          changed_when: false
+
+        - name: Get all pods
+          ansible.builtin.command: kubectl get pods -A -o wide
+          register: k8s_pods
+          changed_when: false
+
+        - name: Get all services
+          ansible.builtin.command: kubectl get svc -A -o wide
+          register: k8s_services
+          changed_when: false
+
+        - name: Display Kubernetes Configuration
+          ansible.builtin.debug:
+            msg:
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "           KUBERNETES CLUSTER STATE"
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "{{ cluster_info.stdout }}"
+              - ""
+              - "Nodes:"
+              - "{{ k8s_nodes.stdout }}"
+              - ""
+              - "Namespaces:"
+              - "{{ k8s_namespaces.stdout }}"
+
+    # ========================================
+    # 4. NETWORK CONFIGURATION
+    # ========================================
+    - name: Gather Network Configuration
+      block:
+        - name: Get network interfaces
+          ansible.builtin.command: ip addr show
+          register: network_interfaces
+          changed_when: false
+
+        - name: Get routing table
+          ansible.builtin.command: ip route show
+          register: routing_table
+          changed_when: false
+
+        - name: Get iptables rules
+          ansible.builtin.command: iptables -L -n -v
+          register: iptables_rules
+          changed_when: false
+          failed_when: false
+
+        - name: Get listening ports
+          ansible.builtin.command: ss -tulpn
+          register: listening_ports
+          changed_when: false
+
+        - name: Display Network Configuration
+          ansible.builtin.debug:
+            msg:
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "           NETWORK CONFIGURATION"
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "Network Interfaces:"
+              - "{{ network_interfaces.stdout }}"
+              - ""
+              - "Routing Table:"
+              - "{{ routing_table.stdout }}"
+
+    # ========================================
+    # 5. SECURITY CONFIGURATION
+    # ========================================
+    - name: Gather Security Configuration
+      block:
+        - name: Check fail2ban status
+          ansible.builtin.command: fail2ban-client status
+          register: fail2ban_status
+          changed_when: false
+          failed_when: false
+
+        - name: Check UFW status
+          ansible.builtin.command: ufw status verbose
+          register: ufw_status
+          changed_when: false
+          failed_when: false
+
+        - name: Check PSAD status
+          ansible.builtin.systemd:
+            name: psad
+          register: psad_service
+          failed_when: false
+
+        - name: Check honeypot status
+          ansible.builtin.shell: ps aux | grep honeypot | grep -v grep
+          register: honeypot_status
+          changed_when: false
+          failed_when: false
+
+        - name: Display Security Configuration
+          ansible.builtin.debug:
+            msg:
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "           SECURITY CONFIGURATION"
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "Fail2ban: {{ 'Active' if fail2ban_status.rc == 0 else 'Inactive' }}"
+              - "UFW Firewall: {{ 'Active' if ufw_status.rc == 0 else 'Inactive' }}"
+              - "PSAD: {{ psad_service.status.ActiveState if psad_service.status is defined else 'Not installed' }}"
+              - "Honeypot: {{ 'Running' if honeypot_status.rc == 0 else 'Not running' }}"
+
+    # ========================================
+    # 6. STORAGE CONFIGURATION
+    # ========================================
+    - name: Gather Storage Configuration
+      block:
+        - name: Get disk usage
+          ansible.builtin.command: df -h
+          register: disk_usage
+          changed_when: false
+
+        - name: Get PersistentVolumes
+          ansible.builtin.command: kubectl get pv
+          register: k8s_pv
+          changed_when: false
+          failed_when: false
+
+        - name: Get PersistentVolumeClaims
+          ansible.builtin.command: kubectl get pvc -A
+          register: k8s_pvc
+          changed_when: false
+          failed_when: false
+
+        - name: Get StorageClasses
+          ansible.builtin.command: kubectl get sc
+          register: k8s_sc
+          changed_when: false
+          failed_when: false
+
+        - name: Display Storage Configuration
+          ansible.builtin.debug:
+            msg:
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "           STORAGE CONFIGURATION"
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "Disk Usage:"
+              - "{{ disk_usage.stdout }}"
+              - ""
+              - "StorageClasses:"
+              - "{{ k8s_sc.stdout if k8s_sc.rc == 0 else 'N/A' }}"
+
+    # ========================================
+    # 7. RESOURCE USAGE
+    # ========================================
+    - name: Gather Resource Usage
+      block:
+        - name: Get system resource usage
+          ansible.builtin.command: "{{ item }}"
+          register: resource_usage
+          changed_when: false
+          loop:
+            - "free -h"
+            - "uptime"
+            - "top -bn1 | head -20"
+
+        - name: Get Kubernetes resource usage
+          ansible.builtin.command: kubectl top node {{ ansible_hostname }}
+          register: k8s_node_usage
+          changed_when: false
+          failed_when: false
+
+        - name: Get pod resource usage
+          ansible.builtin.command: kubectl top pods -A
+          register: k8s_pods_usage
+          changed_when: false
+          failed_when: false
+
+        - name: Display Resource Usage
+          ansible.builtin.debug:
+            msg:
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "           RESOURCE USAGE"
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "Memory:"
+              - "{{ resource_usage.results[0].stdout }}"
+              - ""
+              - "Load Average:"
+              - "{{ resource_usage.results[1].stdout }}"
+              - ""
+              - "Node Resource Usage:"
+              - "{{ k8s_node_usage.stdout if k8s_node_usage.rc == 0 else 'metrics-server not available' }}"
+
+    # ========================================
+    # 8. SAVE CONFIGURATION TO FILE
+    # ========================================
+    - name: Save Configuration to File
+      when: save_to_file
+      block:
+        - name: Create output directory
+          ansible.builtin.file:
+            path: "{{ config_output_dir }}"
+            state: directory
+            mode: '0755'
+
+        - name: Save full configuration to YAML
+          ansible.builtin.copy:
+            content: |
+              # K3s Node Configuration Report
+              # Generated: {{ ansible_date_time.iso8601 }}
+              # Hostname: {{ ansible_hostname }}
+              
+              system:
+                hostname: "{{ ansible_hostname }}"
+                fqdn: "{{ ansible_fqdn }}"
+                os: "{{ ansible_distribution }} {{ ansible_distribution_version }}"
+                kernel: "{{ ansible_kernel }}"
+                architecture: "{{ ansible_architecture }}"
+                cpu_cores: {{ ansible_processor_vcpus }}
+                memory_mb: {{ ansible_memtotal_mb }}
+                ip_address: "{{ ansible_default_ipv4.address | default('N/A') }}"
+              
+              k3s:
+                version: "{{ k3s_version.stdout }}"
+                service_status: "{{ k3s_service.status.ActiveState }}"
+                config_file: |
+                  {{ k3s_config.content | b64decode if k3s_config.content is defined else 'Not found' | indent(6) }}
+              
+              kubernetes:
+                nodes: |
+                  {{ k8s_nodes.stdout | indent(6) }}
+                pods: |
+                  {{ k8s_pods.stdout | indent(6) }}
+                services: |
+                  {{ k8s_services.stdout | indent(6) }}
+              
+              network:
+                interfaces: |
+                  {{ network_interfaces.stdout | indent(6) }}
+                routes: |
+                  {{ routing_table.stdout | indent(6) }}
+                listening_ports: |
+                  {{ listening_ports.stdout | indent(6) }}
+              
+              security:
+                fail2ban: "{{ 'Active' if fail2ban_status.rc == 0 else 'Inactive' }}"
+                ufw: "{{ 'Active' if ufw_status.rc == 0 else 'Inactive' }}"
+                psad: "{{ psad_service.status.ActiveState if psad_service.status is defined else 'Not installed' }}"
+              
+              storage:
+                disk_usage: |
+                  {{ disk_usage.stdout | indent(6) }}
+                persistent_volumes: |
+                  {{ k8s_pv.stdout if k8s_pv.rc == 0 else 'N/A' | indent(6) }}
+              
+              resources:
+                memory: |
+                  {{ resource_usage.results[0].stdout | indent(6) }}
+                load_average: "{{ resource_usage.results[1].stdout }}"
+                node_usage: |
+                  {{ k8s_node_usage.stdout if k8s_node_usage.rc == 0 else 'metrics-server not available' | indent(6) }}
+            dest: "{{ config_output_dir }}/node-config-{{ ansible_hostname }}-{{ ansible_date_time.iso8601_basic_short }}.yaml"
+            mode: '0644'
+
+        - name: Display save location
+          ansible.builtin.debug:
+            msg:
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+              - "Configuration saved to:"
+              - "{{ config_output_dir }}/node-config-{{ ansible_hostname }}-{{ ansible_date_time.iso8601_basic_short }}.yaml"
+              - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+  post_tasks:
+    - name: Summary
+      ansible.builtin.debug:
+        msg:
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "   CONFIGURATION DISPLAY COMPLETE"
+          - "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          - "Full node configuration displayed above"
+          - "{% if save_to_file %}Configuration also saved to {{ config_output_dir }}{% endif %}"

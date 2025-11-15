@@ -1,4 +1,4 @@
-.PHONY: help install setup check deploy optimize security analyze backup clean
+.PHONY: help install setup check deploy optimize security analyze backup clean install-audit run-audit show-config show-config-save
 
 # Default target
 help:
@@ -17,6 +17,12 @@ help:
 	@echo "  make security   - Run security analysis"
 	@echo "  make analyze    - Run system analysis"
 	@echo "  make backup     - Backup configurations"
+	@echo ""
+	@echo "K3s Audit:"
+	@echo "  make install-audit   - Install K3s audit tools"
+	@echo "  make run-audit       - Run K3s cluster audit"
+	@echo "  make show-config     - Display complete node configuration"
+	@echo "  make show-config-save - Display and save node configuration"
 	@echo ""
 	@echo "Maintenance:"
 	@echo "  make update     - Update playbooks from Git"
@@ -70,6 +76,29 @@ backup:
 	cd /opt/k3s-ansible && \
 		source /opt/ansible-venv/bin/activate && \
 		ansible-playbook playbooks/backup-configs.yml
+
+# K3s Audit commands
+install-audit:
+	@echo "🔍 Installing K3s audit tools..."
+	cd /opt/k3s-ansible && \
+		source /opt/ansible-venv/bin/activate && \
+		ansible-playbook playbooks/setup-k3s-audit.yml
+
+run-audit:
+	@echo "📊 Running K3s cluster audit..."
+	ansible k3s_masters -b -m command -a "k3s-cluster-audit"
+
+show-config:
+	@echo "📄 Displaying complete node configuration..."
+	cd /opt/k3s-ansible && \
+		source /opt/ansible-venv/bin/activate && \
+		ansible-playbook playbooks/show-node-config.yml
+
+show-config-save:
+	@echo "📄 Displaying and saving node configuration..."
+	cd /opt/k3s-ansible && \
+		source /opt/ansible-venv/bin/activate && \
+		ansible-playbook playbooks/show-node-config.yml -e "save_to_file=true"
 
 update:
 	@echo "🔄 Updating from Git..."

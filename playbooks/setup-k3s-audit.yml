@@ -1,0 +1,47 @@
+---
+- name: Setup K3s Cluster Audit
+  hosts: k3s_masters
+  become: yes
+  gather_facts: yes
+
+  vars:
+    k3s_audit_enabled: true
+
+  pre_tasks:
+    - name: Check if running on K3s master node
+      ansible.builtin.command: k3s kubectl get nodes
+      register: k3s_check
+      changed_when: false
+      failed_when: false
+
+    - name: Fail if K3s is not installed
+      ansible.builtin.fail:
+        msg: "K3s is not installed or not running on this node"
+      when: k3s_check.rc != 0
+
+  roles:
+    - role: k3s_audit
+      when: k3s_audit_enabled
+
+  post_tasks:
+    - name: Display audit script location
+      ansible.builtin.debug:
+        msg:
+          - "K3s Audit script installed successfully!"
+          - "Run manually: sudo k3s-audit"
+          - "Or use symlink: sudo k3s-cluster-audit"
+          - "Reports saved to: {{ k3s_audit_reports_dir }}"
+
+    - name: Run initial audit
+      ansible.builtin.command:
+        cmd: "{{ k3s_audit_script_path }}"
+      register: initial_audit
+      changed_when: false
+      when: k3s_audit_enabled
+
+    - name: Show audit summary
+      ansible.builtin.debug:
+        var: initial_audit.stdout_lines
+      when: 
+        - k3s_audit_enabled
+        - initial_audit.stdout_lines is defined

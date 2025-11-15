@@ -1,0 +1,9 @@
+---
+# K3s Audit Role - Default Variables
+k3s_audit_script_path: "/usr/local/bin/k3s-cluster-audit"
+k3s_audit_reports_dir: "/var/log/k3s-audit"
+k3s_audit_retention_days: 30
+k3s_audit_cron_enabled: true
+k3s_audit_cron_schedule: "0 6 * * 0"  # Every Sunday at 6 AM
+k3s_audit_email_notifications: false
+k3s_audit_email_recipient: "admin@example.com"

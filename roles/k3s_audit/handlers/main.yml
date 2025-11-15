@@ -1,0 +1,7 @@
+---
+- name: Test audit script
+  ansible.builtin.command:
+    cmd: "{{ k3s_audit_script_path }} --help"
+  register: audit_test
+  failed_when: audit_test.rc != 0
+  changed_when: false

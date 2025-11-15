@@ -1,0 +1,60 @@
+---
+# K3s Audit Role - Main Tasks
+- name: Create audit reports directory
+  ansible.builtin.file:
+    path: "{{ k3s_audit_reports_dir }}"
+    state: directory
+    mode: '0755'
+    owner: root
+    group: root
+
+- name: Copy k3s-cluster-audit script
+  ansible.builtin.copy:
+    src: k3s-cluster-audit.sh
+    dest: "{{ k3s_audit_script_path }}"
+    mode: '0755'
+    owner: root
+    group: root
+  notify: Test audit script
+
+- name: Install required dependencies
+  ansible.builtin.apt:
+    name:
+      - jq
+      - bc
+      - dnsutils
+    state: present
+    update_cache: yes
+
+- name: Setup audit script cron job
+  ansible.builtin.cron:
+    name: "K3s Cluster Audit"
+    minute: "{{ k3s_audit_cron_schedule.split()[0] }}"
+    hour: "{{ k3s_audit_cron_schedule.split()[1] }}"
+    day: "{{ k3s_audit_cron_schedule.split()[2] }}"
+    month: "{{ k3s_audit_cron_schedule.split()[3] }}"
+    weekday: "{{ k3s_audit_cron_schedule.split()[4] }}"
+    job: "{{ k3s_audit_script_path }} > {{ k3s_audit_reports_dir }}/audit-$(date +\\%Y\\%m\\%d-\\%H\\%M\\%S).log 2>&1"
+    user: root
+    state: "{{ 'present' if k3s_audit_cron_enabled else 'absent' }}"
+
+- name: Setup log rotation for audit reports
+  ansible.builtin.copy:
+    dest: /etc/logrotate.d/k3s-audit
+    content: |
+      {{ k3s_audit_reports_dir }}/*.log {
+          daily
+          rotate {{ k3s_audit_retention_days }}
+          compress
+          delaycompress
+          missingok
+          notifempty
+          create 0644 root root
+      }
+    mode: '0644'
+
+- name: Create audit script symlink for easy access
+  ansible.builtin.file:
+    src: "{{ k3s_audit_script_path }}"
+    dest: /usr/local/bin/k3s-audit
+    state: link
