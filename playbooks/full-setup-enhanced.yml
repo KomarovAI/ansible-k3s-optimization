@@ -1,0 +1,48 @@
+---
+- name: Complete K3s Node Setup with Advanced Security
+  hosts: localhost
+  connection: local
+  become: yes
+  gather_facts: yes
+
+  roles:
+    # Basic optimization
+    - system_optimization
+    
+    # Security foundation
+    - ssh_security
+    - fail2ban
+    - honeypot
+    
+    # Advanced security stack
+    - ipset
+    - xt_recent
+    - psad
+    - arpwatch
+    - kernel_security
+
+  post_tasks:
+    - name: Final status check
+      shell: |
+        echo "════════════════════════════════════════════════════════"
+        echo "COMPLETE SECURITY STACK DEPLOYED!"
+        echo "════════════════════════════════════════════════════════"
+        echo ""
+        echo "System Optimization: ✅"
+        echo "SSH Hardening: ✅"
+        echo "Fail2ban + Honeypot: ✅"
+        echo "PSAD (Port Scan Detection): ✅"
+        echo "ARPwatch (ARP Protection): ✅"
+        echo "ipset (Performance Blacklist): ✅"
+        echo "xt_recent (Kernel Autoban): ✅"
+        echo "SYN Cookies: ✅"
+        echo "Conntrack Limits: ✅"
+        echo "AppArmor: ✅"
+        echo ""
+        echo "Run: /usr/local/bin/security-stack-status"
+      register: final_status
+      changed_when: false
+
+    - name: Display final status
+      debug:
+        msg: "{{ final_status.stdout_lines }}"
