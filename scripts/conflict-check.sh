@@ -2,6 +2,7 @@
 #
 # K3s Node Conflict Check Script
 # Performs quick conflict detection without Ansible
+# Now with intelligent false positive filtering!
 #
 # Usage: /usr/local/bin/k3s-conflict-check
 #
@@ -60,17 +61,32 @@ else
 fi
 
 #########################################################################
-# 3. PORT CONFLICTS
+# 3. PORT CONFLICTS (SMART HONEYPOT DETECTION)
 #########################################################################
 echo -e "${BLUE}[3/9] Checking ports...${NC}"
 HONEYPOT_CONFLICTS=0
+
+# Get honeypot PID to exclude from conflicts
+HONEYPOT_PID=$(ps aux | grep '[h]oneypot.py' | awk '{print $2}' | head -1 || echo "")
+
 honeypot_ports="21 22 23 25 110 143 3306 3389 5432"
 for port in $honeypot_ports; do
-    real_service=$(netstat -tlnp 2>/dev/null | grep ":$port " | grep -v honeypot | awk '{print $7}' | head -1 || true)
-    if [ -n "$real_service" ]; then
-        echo -e "  ${RED}❌ Port $port: honeypot conflicts with $real_service${NC}"
-        ((HONEYPOT_CONFLICTS+=1))
-    fi
+    # Get all services on this port
+    services=$(netstat -tlnp 2>/dev/null | grep ":$port " | awk '{print $7}' || true)
+    
+    # Check each service
+    while IFS= read -r service; do
+        if [ -n "$service" ] && [ "$service" != "-" ]; then
+            service_pid=$(echo "$service" | cut -d'/' -f1)
+            service_name=$(echo "$service" | cut -d'/' -f2)
+            
+            # Skip if this is the honeypot itself
+            if [ "$service_pid" != "$HONEYPOT_PID" ]; then
+                echo -e "  ${RED}❌ Port $port: conflict between honeypot and $service${NC}"
+                ((HONEYPOT_CONFLICTS+=1))
+            fi
+        fi
+    done <<< "$services"
 done
 
 if [ $HONEYPOT_CONFLICTS -gt 0 ]; then
@@ -102,27 +118,27 @@ else
 fi
 
 #########################################################################
-# 5. KERNEL MODULES
+# 5. KERNEL MODULES (IMPROVED DETECTION)
 #########################################################################
 echo -e "${BLUE}[5/9] Checking kernel modules...${NC}"
 MODULE_ISSUES=0
 
 # Check conflicting modules
-if lsmod | grep -q ipt_recent && lsmod | grep -q xt_recent; then
+if lsmod | awk '{print $1}' | grep -q '^ipt_recent$' && lsmod | awk '{print $1}' | grep -q '^xt_recent$'; then
     echo -e "  ${RED}❌ Both ipt_recent and xt_recent loaded (conflict)${NC}"
     ((MODULE_ISSUES+=1))
 fi
 
-# Check required modules
+# Check required modules (improved: check by module name column)
 for mod in nf_conntrack xt_recent; do
-    if ! lsmod | grep -q "^$mod "; then
+    if ! lsmod | awk '{print $1}' | grep -q "^${mod}$"; then
         echo -e "  ${YELLOW}⚠️  $mod not loaded${NC}"
         ((MODULE_ISSUES+=1))
     fi
 done
 
 if [ $MODULE_ISSUES -gt 0 ]; then
-    if lsmod | grep -q ipt_recent && lsmod | grep -q xt_recent; then
+    if lsmod | awk '{print $1}' | grep -q '^ipt_recent$' && lsmod | awk '{print $1}' | grep -q '^xt_recent$'; then
         ((ERRORS+=1))
     else
         ((WARNINGS+=1))
@@ -133,7 +149,7 @@ else
 fi
 
 #########################################################################
-# 6. IPSET
+# 6. IPSET (SMART USAGE DETECTION)
 #########################################################################
 echo -e "${BLUE}[6/9] Checking ipset...${NC}"
 IPSET_ISSUES=0
@@ -151,10 +167,11 @@ else
         fi
     done
     
-    # Check if sets are used in iptables
+    # Check if sets are REALLY used in iptables (case-insensitive, flexible matching)
     for set in blacklist fail2ban-sshd fail2ban-honeypot; do
         if ipset list -n 2>/dev/null | grep -q "^$set$"; then
-            if ! iptables -S 2>/dev/null | grep -q "match-set $set"; then
+            # Check with case-insensitive and flexible pattern
+            if ! iptables -S 2>/dev/null | grep -qi "match-set.*$set"; then
                 echo -e "  ${YELLOW}⚠️  ipset $set exists but not used in iptables${NC}"
                 ((IPSET_ISSUES+=1))
             fi
@@ -170,13 +187,13 @@ else
 fi
 
 #########################################################################
-# 7. XT_RECENT
+# 7. XT_RECENT (IMPROVED DETECTION)
 #########################################################################
 echo -e "${BLUE}[7/9] Checking xt_recent...${NC}"
 XT_RECENT_ISSUES=0
 
-# Check if module loaded
-if ! lsmod | grep -q xt_recent; then
+# Check if module loaded (improved detection)
+if ! lsmod | awk '{print $1}' | grep -q '^xt_recent$'; then
     echo -e "  ${RED}❌ xt_recent module not loaded${NC}"
     ((XT_RECENT_ISSUES+=1))
 else
@@ -196,7 +213,7 @@ else
 fi
 
 if [ $XT_RECENT_ISSUES -gt 0 ]; then
-    if ! lsmod | grep -q xt_recent; then
+    if ! lsmod | awk '{print $1}' | grep -q '^xt_recent$'; then
         ((ERRORS+=1))
     else
         ((WARNINGS+=1))
@@ -207,7 +224,7 @@ else
 fi
 
 #########################################################################
-# 8. ARPWATCH
+# 8. ARPWATCH (SMART PROCESS DETECTION)
 #########################################################################
 echo -e "${BLUE}[8/9] Checking ARPwatch...${NC}"
 ARPWATCH_ISSUES=0
@@ -219,42 +236,33 @@ if [ -z "$MAIN_IFACE" ]; then
     echo -e "  ${YELLOW}⚠️  Could not detect main interface${NC}"
     ((ARPWATCH_ISSUES+=1))
 else
-    # Check if ARPwatch service exists
-    if ! systemctl list-unit-files 2>/dev/null | grep -q "arpwatch-${MAIN_IFACE}.service"; then
-        echo -e "  ${YELLOW}⚠️  ARPwatch not configured for ${MAIN_IFACE}${NC}"
+    # Check if ANY arpwatch process is monitoring main interface (service OR manual)
+    ARPWATCH_MAIN=$(ps aux | grep "[a]rpwatch.*${MAIN_IFACE}" | wc -l || echo 0)
+    
+    if [ $ARPWATCH_MAIN -eq 0 ]; then
+        echo -e "  ${YELLOW}⚠️  ARPwatch not monitoring ${MAIN_IFACE}${NC}"
         ((ARPWATCH_ISSUES+=1))
     else
-        # Check if active
-        if ! systemctl is-active arpwatch-${MAIN_IFACE} &>/dev/null; then
-            echo -e "  ${RED}❌ arpwatch-${MAIN_IFACE}: inactive${NC}"
+        # Check for MAC address changes (MITM attacks) - check all arpwatch services
+        MAC_CHANGES=0
+        for arpwatch_service in $(systemctl list-units --type=service --state=running 'arpwatch-*' --no-legend | awk '{print $1}' || true); do
+            changes=$(journalctl -u "$arpwatch_service" --since "1 hour ago" 2>/dev/null | grep -c "changed ethernet" || echo 0)
+            MAC_CHANGES=$((MAC_CHANGES + changes))
+        done
+        
+        if [ $MAC_CHANGES -gt 0 ]; then
+            echo -e "  ${RED}🚨 MAC ADDRESS CHANGES: $MAC_CHANGES in last hour (MITM ATTACK?)${NC}"
             ((ARPWATCH_ISSUES+=2))
-        else
-            # Check for MAC address changes (MITM attacks)
-            MAC_CHANGES=$(journalctl -u arpwatch-${MAIN_IFACE} --since "1 hour ago" 2>/dev/null | grep -c "changed ethernet" || echo 0)
-            if [ $MAC_CHANGES -gt 0 ]; then
-                echo -e "  ${RED}🚨 MAC ADDRESS CHANGES: $MAC_CHANGES in last hour (MITM ATTACK?)${NC}"
-                ((ARPWATCH_ISSUES+=2))
-            fi
         fi
     fi
     
     # Check cni0 if exists
     if ip link show cni0 &>/dev/null; then
-        if ! systemctl list-unit-files 2>/dev/null | grep -q "arpwatch-cni0.service"; then
-            echo -e "  ${YELLOW}⚠️  ARPwatch not configured for cni0${NC}"
+        ARPWATCH_CNI0=$(ps aux | grep "[a]rpwatch.*cni0" | wc -l || echo 0)
+        
+        if [ $ARPWATCH_CNI0 -eq 0 ]; then
+            echo -e "  ${YELLOW}⚠️  ARPwatch not monitoring cni0${NC}"
             ((ARPWATCH_ISSUES+=1))
-        else
-            if ! systemctl is-active arpwatch-cni0 &>/dev/null; then
-                echo -e "  ${RED}❌ arpwatch-cni0: inactive${NC}"
-                ((ARPWATCH_ISSUES+=2))
-            else
-                # Check for pod MAC spoofing
-                POD_MAC_CHANGES=$(journalctl -u arpwatch-cni0 --since "1 hour ago" 2>/dev/null | grep -c "changed ethernet" || echo 0)
-                if [ $POD_MAC_CHANGES -gt 0 ]; then
-                    echo -e "  ${RED}🚨 POD MAC SPOOFING: $POD_MAC_CHANGES changes (MALICIOUS POD?)${NC}"
-                    ((ARPWATCH_ISSUES+=2))
-                fi
-            fi
         fi
     fi
 fi
