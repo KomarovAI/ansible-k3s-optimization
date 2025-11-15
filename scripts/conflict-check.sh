@@ -211,8 +211,9 @@ else
     
     # Check iptables rules (improved: check all chains, accept any recent rules)
     # Look for any rule with -m recent (set, update, check, etc.)
-    # FIX: Simple negation works correctly, removed || false that breaks precedence
-    if ! iptables-save 2>/dev/null | grep -q "\-m recent"; then
+    # FIX: Use subshell to handle SIGPIPE (exit 141) from grep -q with pipefail
+    # When grep -q finds match and closes pipe, iptables-save gets SIGPIPE
+    if ! ( iptables-save 2>/dev/null | { grep -q "\-m recent"; ec=$?; exit $(( ec == 0 || ec == 141 ? 0 : ec )); } ); then
         echo -e "  ${YELLOW}\u26a0\ufe0f  No iptables rules using xt_recent${NC}"
         ((XT_RECENT_ISSUES+=1))
     fi
