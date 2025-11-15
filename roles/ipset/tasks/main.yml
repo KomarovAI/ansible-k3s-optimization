@@ -1,0 +1,108 @@
+---
+- name: Install ipset
+  apt:
+    name:
+      - ipset
+      - ipset-persistent
+    state: present
+    update_cache: yes
+
+- name: Create ipset blacklist
+  shell: |
+    ipset create {{ ipset_blacklist_name }} hash:ip hashsize {{ ipset_hash_size }} maxelem {{ ipset_max_elem }} -exist
+  changed_when: false
+
+- name: Create ipset for fail2ban SSH jail
+  shell: |
+    ipset create {{ ipset_fail2ban_sshd_name }} hash:ip timeout 86400 hashsize {{ ipset_hash_size }} maxelem {{ ipset_max_elem }} -exist
+  changed_when: false
+
+- name: Create ipset for fail2ban honeypot jail
+  shell: |
+    ipset create {{ ipset_fail2ban_honeypot_name }} hash:ip timeout 86400 hashsize {{ ipset_hash_size }} maxelem {{ ipset_max_elem }} -exist
+  changed_when: false
+
+- name: Add permanent blacklist IPs
+  shell: |
+    ipset add {{ ipset_blacklist_name }} {{ item }} -exist
+  loop: "{{ ipset_permanent_blacklist }}"
+  when: ipset_permanent_blacklist | length > 0
+
+- name: Configure iptables to use ipset blacklist
+  iptables:
+    chain: INPUT
+    match_set: "{{ ipset_blacklist_name }}"
+    match_set_flags: src
+    jump: DROP
+    comment: "Block IPs from ipset blacklist"
+    state: present
+
+- name: Configure iptables for fail2ban SSH ipset
+  iptables:
+    chain: INPUT
+    match_set: "{{ ipset_fail2ban_sshd_name }}"
+    match_set_flags: src
+    jump: DROP
+    comment: "Block fail2ban SSH attackers"
+    state: present
+
+- name: Configure iptables for fail2ban honeypot ipset
+  iptables:
+    chain: INPUT
+    match_set: "{{ ipset_fail2ban_honeypot_name }}"
+    match_set_flags: src
+    jump: DROP
+    comment: "Block honeypot attackers"
+    state: present
+
+- name: Save iptables rules
+  shell: |
+    iptables-save > /etc/iptables/rules.v4
+  changed_when: false
+
+- name: Save ipset to file
+  shell: |
+    ipset save > /etc/ipset.conf
+  changed_when: false
+
+- name: Create systemd service to restore ipset on boot
+  copy:
+    content: |
+      [Unit]
+      Description=Restore ipset on boot
+      Before=netfilter-persistent.service
+      Before=iptables.service
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/sbin/ipset restore -f /etc/ipset.conf
+      RemainAfterExit=yes
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/ipset-restore.service
+    mode: '0644'
+
+- name: Enable ipset restore service
+  systemd:
+    name: ipset-restore
+    enabled: yes
+    daemon_reload: yes
+
+- name: Display ipset status
+  debug:
+    msg: |
+      ✅ ipset configured for high-performance IP blacklisting!
+      
+      Sets created:
+      - {{ ipset_blacklist_name }} (permanent blacklist)
+      - {{ ipset_fail2ban_sshd_name }} (fail2ban SSH)
+      - {{ ipset_fail2ban_honeypot_name }} (fail2ban honeypot)
+      
+      Commands:
+      - List all sets: ipset list
+      - Add IP to blacklist: ipset add {{ ipset_blacklist_name }} 1.2.3.4
+      - Remove IP: ipset del {{ ipset_blacklist_name }} 1.2.3.4
+      - Save: ipset save > /etc/ipset.conf
+      
+      Performance: O(1) lookup vs O(N) in iptables!

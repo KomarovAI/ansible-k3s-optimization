@@ -1,0 +1,5 @@
+---
+- name: Save ipset
+  shell: |
+    ipset save > /etc/ipset.conf
+  changed_when: false

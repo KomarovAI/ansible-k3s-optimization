@@ -1,0 +1,12 @@
+---
+# ipset configuration
+ipset_blacklist_name: blacklist
+ipset_fail2ban_sshd_name: fail2ban-sshd
+ipset_fail2ban_honeypot_name: fail2ban-honeypot
+ipset_hash_size: 1024
+ipset_max_elem: 65536
+
+# Pre-defined blacklist IPs (optional)
+ipset_permanent_blacklist: []
+  # - 192.168.1.100
+  # - 10.0.0.5
