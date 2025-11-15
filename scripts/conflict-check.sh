@@ -167,11 +167,12 @@ else
         fi
     done
     
-    # Check if sets are REALLY used in iptables (case-insensitive, flexible matching)
+    # Check if sets are REALLY used in iptables (improved: check ALL chains including custom)
     for set in blacklist fail2ban-sshd fail2ban-honeypot; do
         if ipset list -n 2>/dev/null | grep -q "^$set$"; then
-            # Check with case-insensitive and flexible pattern
-            if ! iptables -S 2>/dev/null | grep -qi "match-set.*$set"; then
+            # Check in all iptables chains (INPUT, FORWARD, custom chains)
+            # Look for: -m set --match-set <setname>
+            if ! iptables-save 2>/dev/null | grep -q "\-m set.*\-\-match-set $set"; then
                 echo -e "  ${YELLOW}⚠️  ipset $set exists but not used in iptables${NC}"
                 ((IPSET_ISSUES+=1))
             fi
@@ -205,8 +206,9 @@ else
         fi
     done
     
-    # Check iptables rules
-    if ! iptables -S 2>/dev/null | grep -q "recent.*ssh_attack"; then
+    # Check iptables rules (improved: check all chains, accept any recent rules)
+    # Look for any rule with -m recent (set, update, check, etc.)
+    if ! iptables-save 2>/dev/null | grep -q "\-m recent"; then
         echo -e "  ${YELLOW}⚠️  No iptables rules using xt_recent${NC}"
         ((XT_RECENT_ISSUES+=1))
     fi
@@ -224,7 +226,7 @@ else
 fi
 
 #########################################################################
-# 8. ARPWATCH (SMART PROCESS DETECTION)
+# 8. ARPWATCH (SMART PROCESS DETECTION - FIXED)
 #########################################################################
 echo -e "${BLUE}[8/9] Checking ARPwatch...${NC}"
 ARPWATCH_ISSUES=0
@@ -245,9 +247,13 @@ else
     else
         # Check for MAC address changes (MITM attacks) - check all arpwatch services
         MAC_CHANGES=0
-        for arpwatch_service in $(systemctl list-units --type=service --state=running 'arpwatch-*' --no-legend | awk '{print $1}' || true); do
-            changes=$(journalctl -u "$arpwatch_service" --since "1 hour ago" 2>/dev/null | grep -c "changed ethernet" || echo 0)
-            MAC_CHANGES=$((MAC_CHANGES + changes))
+        for arpwatch_service in $(systemctl list-units --type=service --state=running 'arpwatch-*' --no-legend 2>/dev/null | awk '{print $1}' || true); do
+            # FIX: Ensure changes is always a single number
+            changes=$(journalctl -u "$arpwatch_service" --since "1 hour ago" 2>/dev/null | grep -c "changed ethernet" | head -1 || echo "0")
+            # Ensure it's a valid number before arithmetic
+            if [[ "$changes" =~ ^[0-9]+$ ]]; then
+                MAC_CHANGES=$((MAC_CHANGES + changes))
+            fi
         done
         
         if [ $MAC_CHANGES -gt 0 ]; then
