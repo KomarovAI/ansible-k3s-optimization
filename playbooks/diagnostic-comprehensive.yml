@@ -122,11 +122,14 @@
 
     - name: Check honeypot vs real service ports (exclude honeypot PID)
       shell: |
+        honeypot_pid='{{ honeypot_pid.stdout }}'
+        if [ -z "$honeypot_pid" ]; then
+          echo ""
+          exit 0
+        fi
         honeypot_ports="21 22 23 25 110 143 3306 3389 5432"
-        honeypot_pid="{{ honeypot_pid.stdout }}"
         conflicts=""
         for port in $honeypot_ports; do
-          # Exclude honeypot's own PID from conflict check
           real_service=$(netstat -tlnp 2>/dev/null | grep ":$port " | grep -v "$honeypot_pid" | grep -v honeypot | awk '{print $7}')
           if [ -n "$real_service" ]; then
             conflicts="${conflicts}❌ Port $port: honeypot conflicts with $real_service\n"
@@ -172,7 +175,7 @@
 
     - name: Check for failed security services
       shell: |
-        main_iface="{{ main_iface.stdout }}"
+        main_iface='{{ main_iface.stdout }}'
         for service in fail2ban psad arpwatch-${main_iface} arpwatch-cni0 honeypot; do
           if systemctl is-enabled $service &>/dev/null; then
             status=$(systemctl is-active $service)
