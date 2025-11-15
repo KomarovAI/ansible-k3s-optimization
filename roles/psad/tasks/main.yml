@@ -14,6 +14,20 @@
     mode: '0600'
   notify: Restart psad
 
+- name: Disable email notifications in PSAD (prevent postfix warnings)
+  lineinfile:
+    path: /etc/psad/psad.conf
+    regexp: '^EMAIL_LIMIT'
+    line: 'EMAIL_LIMIT           0;'
+  notify: Restart psad
+
+- name: Clear email addresses in PSAD configuration
+  lineinfile:
+    path: /etc/psad/psad.conf
+    regexp: '^EMAIL_ADDRESSES'
+    line: 'EMAIL_ADDRESSES       "";'
+  notify: Restart psad
+
 - name: Configure iptables logging for PSAD
   block:
     - name: Add INPUT chain logging
@@ -62,4 +76,4 @@
       Check status: psad --Status
       View analysis: psad --Analyze
       Logs: tail -f /var/log/psad/psadfifo
-      Email alerts: {{ psad_email_addresses }}
+      Email notifications: DISABLED (EMAIL_LIMIT=0)
