@@ -12,84 +12,78 @@
     name: xt_recent
     state: present
 
-- name: Configure SSH rate limiting with xt_recent
-  block:
-    - name: Set SSH connection tracking
-      iptables:
-        chain: INPUT
-        protocol: tcp
-        destination_port: "{{ ssh_port }}"
-        match: state
-        ctstate: NEW
-        jump: SET
-        set_name: ssh_attack
-        set_operation: set
-        comment: "Track SSH connection attempts"
-        state: present
-
-    - name: Drop excessive SSH connections
-      iptables:
-        chain: INPUT
-        protocol: tcp
-        destination_port: "{{ ssh_port }}"
-        match: state
-        ctstate: NEW
-        jump: DROP
-        match_set: ssh_attack
-        match_set_flags: src
-        recent_seconds: "{{ ssh_rate_limit_seconds }}"
-        recent_hitcount: "{{ ssh_rate_limit_hitcount }}"
-        comment: "Drop SSH brute-force attempts"
-        state: present
-
-- name: Configure port scan detection with xt_recent
-  block:
-    - name: Set port scan tracking
-      iptables:
-        chain: INPUT
-        protocol: tcp
-        match: state
-        ctstate: NEW
-        jump: SET
-        set_name: portscan
-        set_operation: set
-        comment: "Track new TCP connections"
-        state: present
-
-    - name: Log port scan attempts
-      iptables:
-        chain: INPUT
-        protocol: tcp
-        match: state
-        ctstate: NEW
-        jump: LOG
-        log_prefix: '[PORTSCAN DETECTED] '
-        log_level: warning
-        match_set: portscan
-        match_set_flags: src
-        recent_seconds: "{{ portscan_seconds }}"
-        recent_hitcount: "{{ portscan_hitcount }}"
-        comment: "Log port scanners"
-        state: present
-
-    - name: Drop port scan attempts
-      iptables:
-        chain: INPUT
-        protocol: tcp
-        match: state
-        ctstate: NEW
-        jump: DROP
-        match_set: portscan
-        match_set_flags: src
-        recent_seconds: "{{ portscan_seconds }}"
-        recent_hitcount: "{{ portscan_hitcount }}"
-        comment: "Drop port scanners"
-        state: present
-
-- name: Save iptables rules
-  shell: |
-    iptables-save > /etc/iptables/rules.v4
+- name: Check if SSH tracking rule exists
+  shell: iptables -S INPUT | grep -q 'ssh_attack.*--set'
+  register: ssh_tracking_exists
+  failed_when: false
   changed_when: false
+
+- name: Configure SSH rate limiting with xt_recent (tracking)
+  shell: |
+    iptables -A INPUT -p tcp --dport {{ ssh_port }} -m state --state NEW \
+      -m recent --set --name ssh_attack \
+      -m comment --comment "Track SSH connection attempts"
+  when: ssh_tracking_exists.rc != 0
+  notify: Save iptables rules
+
+- name: Check if SSH drop rule exists
+  shell: iptables -S INPUT | grep -q 'ssh_attack.*--update'
+  register: ssh_drop_exists
+  failed_when: false
+  changed_when: false
+
+- name: Configure SSH rate limiting with xt_recent (drop)
+  shell: |
+    iptables -A INPUT -p tcp --dport {{ ssh_port }} -m state --state NEW \
+      -m recent --update --seconds {{ ssh_rate_limit_seconds }} --hitcount {{ ssh_rate_limit_hitcount }} --name ssh_attack \
+      -j DROP \
+      -m comment --comment "Drop SSH brute-force ({{ ssh_rate_limit_hitcount }} attempts in {{ ssh_rate_limit_seconds }}s)"
+  when: ssh_drop_exists.rc != 0
+  notify: Save iptables rules
+
+- name: Check if port scan tracking rule exists
+  shell: iptables -S INPUT | grep -q 'portscan.*--set'
+  register: portscan_tracking_exists
+  failed_when: false
+  changed_when: false
+
+- name: Configure port scan detection with xt_recent (tracking)
+  shell: |
+    iptables -A INPUT -p tcp -m state --state NEW \
+      -m recent --set --name portscan \
+      -m comment --comment "Track new TCP connections for port scan detection"
+  when: portscan_tracking_exists.rc != 0
+  notify: Save iptables rules
+
+- name: Check if port scan log rule exists
+  shell: iptables -S INPUT | grep -q 'PORTSCAN DETECTED'
+  register: portscan_log_exists
+  failed_when: false
+  changed_when: false
+
+- name: Log port scan attempts
+  shell: |
+    iptables -A INPUT -p tcp -m state --state NEW \
+      -m recent --update --seconds {{ portscan_seconds }} --hitcount {{ portscan_hitcount }} --name portscan \
+      -j LOG --log-prefix '[PORTSCAN DETECTED] ' --log-level warning \
+      -m comment --comment "Log port scanners ({{ portscan_hitcount }} ports in {{ portscan_seconds }}s)"
+  when: portscan_log_exists.rc != 0
+  notify: Save iptables rules
+
+- name: Check if port scan drop rule exists
+  shell: iptables -S INPUT | grep -q 'portscan.*DROP'
+  register: portscan_drop_exists
+  failed_when: false
+  changed_when: false
+
+- name: Drop port scan attempts
+  shell: |
+    iptables -A INPUT -p tcp -m state --state NEW \
+      -m recent --update --seconds {{ portscan_seconds }} --hitcount {{ portscan_hitcount }} --name portscan \
+      -j DROP \
+      -m comment --comment "Drop port scanners"
+  when: portscan_drop_exists.rc != 0
+  notify: Save iptables rules
 
 - name: Display xt_recent status
   debug:
