@@ -1,0 +1,4 @@
+---
+- import_playbook: diagnostic-master.yml
+- import_playbook: diagnostic-security.yml
+- import_playbook: diagnostic-network.yml

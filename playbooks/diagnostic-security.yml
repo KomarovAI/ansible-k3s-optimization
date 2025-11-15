@@ -1,0 +1,66 @@
+---
+- name: Security Stack Diagnostic
+  hosts: localhost
+  connection: local
+  become: yes
+
+  tasks:
+    - name: Honeypot status
+      shell: systemctl is-active honeypot 2>/dev/null || echo "INACTIVE"
+      register: honeypot_status
+      changed_when: false
+
+    - name: Recent honeypot attacks
+      shell: |
+        if [ -f /var/log/honeypot.log ]; then
+          tail -100 /var/log/honeypot.log | grep "Connection from" | \
+          awk '{print $6}' | cut -d: -f1 | sort | uniq -c | sort -rn | head -5 | \
+          awk '{printf "%s attacks from %s\n", $1, $2}'
+        else
+          echo "No honeypot log"
+        fi
+      register: top_attackers
+      changed_when: false
+
+    - name: Fail2ban stats
+      shell: |
+        fail2ban-client status 2>/dev/null | grep "Jail list" | cut -d: -f2 | xargs | \
+        awk '{printf "Active jails: %s\n", $0}'
+        fail2ban-client status sshd 2>/dev/null | grep "Currently banned" | awk '{print "SSH banned: "$NF}'
+        fail2ban-client status honeypot 2>/dev/null | grep "Currently banned" | awk '{print "Honeypot banned: "$NF}'
+      register: fail2ban_stats
+      changed_when: false
+      failed_when: false
+
+    - name: Firewall status
+      shell: |
+        ufw status 2>/dev/null | head -1
+        iptables -L INPUT -v -n | grep -c "DROP\|REJECT" | awk '{print "IPTables DROP/REJECT rules: "$1}'
+      register: firewall_status
+      changed_when: false
+
+    - name: Open ports count
+      shell: |
+        ss -tunlp | grep LISTEN | wc -l | awk '{print "Listening ports: "$1}'
+      register: ports_count
+      changed_when: false
+
+    - name: Display Security Status
+      debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════╗
+          ║              SECURITY STACK DIAGNOSTIC                   ║
+          ╠══════════════════════════════════════════════════════════╣
+          ║ HONEYPOT                                                 ║
+          ║ Status: {{ honeypot_status.stdout }}
+          ║                                                          ║
+          ║ TOP 5 ATTACKERS (last 100 connections)                   ║
+          ║ {{ top_attackers.stdout_lines | join('\n║ ') if top_attackers.stdout_lines else '║ No attacks logged' }}
+          ║                                                          ║
+          ║ FAIL2BAN                                                 ║
+          ║ {{ fail2ban_stats.stdout_lines | join('\n║ ') if fail2ban_stats.stdout_lines else '║ Not active' }}
+          ║                                                          ║
+          ║ FIREWALL                                                 ║
+          ║ {{ firewall_status.stdout_lines | join('\n║ ') }}
+          ║ {{ ports_count.stdout }}
+          ╚══════════════════════════════════════════════════════════╝

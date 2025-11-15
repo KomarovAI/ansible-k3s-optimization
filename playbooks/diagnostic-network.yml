@@ -1,0 +1,61 @@
+---
+- name: Network Diagnostic
+  hosts: localhost
+  connection: local
+  become: yes
+
+  tasks:
+    - name: Network interfaces
+      shell: |
+        ip -br addr | grep -v "^lo" | awk '{printf "%s: %s\n", $1, $3}'
+      register: interfaces
+      changed_when: false
+
+    - name: Active connections
+      shell: |
+        ss -s | grep "TCP:" | head -1
+        ss -tunp | grep ESTAB | wc -l | awk '{print "Established TCP: "$1}'
+      register: connections
+      changed_when: false
+
+    - name: Top bandwidth consumers
+      shell: |
+        ss -tunp state established | awk 'NR>1{print $6}' | cut -d: -f1 | sort | uniq -c | sort -rn | head -3 | \
+        awk '{printf "%s connections to %s\n", $1, $2}'
+      register: bandwidth
+      changed_when: false
+      failed_when: false
+
+    - name: DNS resolution test
+      shell: |
+        timeout 2 nslookup google.com 8.8.8.8 >/dev/null 2>&1 && echo "OK" || echo "FAILED"
+      register: dns_test
+      changed_when: false
+      failed_when: false
+
+    - name: Internet connectivity
+      shell: |
+        timeout 3 ping -c 1 8.8.8.8 >/dev/null 2>&1 && echo "OK" || echo "FAILED"
+      register: ping_test
+      changed_when: false
+      failed_when: false
+
+    - name: Display Network Status
+      debug:
+        msg: |
+          ╔══════════════════════════════════════════════════════════╗
+          ║              NETWORK DIAGNOSTIC                          ║
+          ╠══════════════════════════════════════════════════════════╣
+          ║ INTERFACES                                               ║
+          ║ {{ interfaces.stdout_lines | join('\n║ ') }}
+          ║                                                          ║
+          ║ CONNECTIONS                                              ║
+          ║ {{ connections.stdout_lines | join('\n║ ') }}
+          ║                                                          ║
+          ║ TOP CONNECTIONS                                          ║
+          ║ {{ bandwidth.stdout_lines | join('\n║ ') if bandwidth.stdout_lines else '║ No active connections' }}
+          ║                                                          ║
+          ║ CONNECTIVITY TESTS                                       ║
+          ║ DNS (8.8.8.8): {{ dns_test.stdout }}
+          ║ Ping (8.8.8.8): {{ ping_test.stdout }}
+          ╚══════════════════════════════════════════════════════════╝
