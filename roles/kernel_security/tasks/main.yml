@@ -1,0 +1,152 @@
+---
+#########################################################################
+# 1. SYN COOKIES - DDoS Protection
+#########################################################################
+- name: Configure SYN cookies and TCP parameters
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+    sysctl_file: /etc/sysctl.d/90-syn-protection.conf
+  loop:
+    - { key: 'net.ipv4.tcp_syncookies', value: '{{ syn_cookies_enabled }}' }
+    - { key: 'net.ipv4.tcp_max_syn_backlog', value: '{{ tcp_max_syn_backlog }}' }
+    - { key: 'net.ipv4.tcp_synack_retries', value: '{{ tcp_synack_retries }}' }
+    - { key: 'net.ipv4.tcp_syn_retries', value: '{{ tcp_syn_retries }}' }
+
+#########################################################################
+# 2. CONNECTION TRACKING LIMITS
+#########################################################################
+- name: Configure conntrack parameters
+  sysctl:
+    name: "{{ item.key }}"
+    value: "{{ item.value }}"
+    state: present
+    reload: yes
+    sysctl_file: /etc/sysctl.d/90-conntrack.conf
+  loop:
+    - { key: 'net.netfilter.nf_conntrack_max', value: '{{ conntrack_max }}' }
+    - { key: 'net.netfilter.nf_conntrack_tcp_timeout_established', value: '{{ conntrack_tcp_timeout_established }}' }
+    - { key: 'net.netfilter.nf_conntrack_generic_timeout', value: '{{ conntrack_generic_timeout }}' }
+
+- name: Configure per-IP connection limits with iptables
+  block:
+    - name: Limit concurrent connections per IP
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        match: connlimit
+        connlimit_above: "{{ conntrack_limit_per_ip }}"
+        jump: REJECT
+        reject_with: tcp-reset
+        comment: "Limit {{ conntrack_limit_per_ip }} connections per IP"
+        state: present
+
+    - name: Limit new connections per IP (rate limiting)
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        match: state
+        ctstate: NEW
+        match_limit: limit
+        limit: "{{ conntrack_new_limit_per_ip }}/sec"
+        limit_burst: "{{ conntrack_new_limit_per_ip }}"
+        jump: ACCEPT
+        comment: "Rate limit new connections"
+        state: present
+
+- name: Save iptables rules
+  shell: |
+    iptables-save > /etc/iptables/rules.v4
+  changed_when: false
+
+#########################################################################
+# 3. APPARMOR - Container Security
+#########################################################################
+- name: Install AppArmor
+  apt:
+    name:
+      - apparmor
+      - apparmor-utils
+    state: present
+  when: apparmor_enabled
+
+- name: Enable AppArmor service
+  systemd:
+    name: apparmor
+    enabled: yes
+    state: started
+  when: apparmor_enabled
+
+- name: Create K3s restrictive AppArmor profile
+  copy:
+    content: |
+      #include <tunables/global>
+      
+      profile k3s-restricted flags=(attach_disconnected,mediate_deleted) {
+        #include <abstractions/base>
+        
+        # Deny write to /proc and /sys
+        deny /proc/** w,
+        deny /sys/** w,
+        
+        # Allow necessary capabilities only
+        capability net_admin,
+        capability net_raw,
+        capability sys_admin,
+        capability sys_chroot,
+        capability sys_ptrace,
+        capability dac_override,
+        capability setuid,
+        capability setgid,
+        
+        # Deny dangerous operations
+        deny mount,
+        deny umount,
+        deny ptrace,
+        
+        # Allow network
+        network inet stream,
+        network inet6 stream,
+        network inet dgram,
+        network inet6 dgram,
+        
+        # Allow necessary file operations
+        /var/lib/rancher/k3s/** rw,
+        /var/log/pods/** rw,
+        /run/k3s/** rw,
+      }
+    dest: /etc/apparmor.d/k3s-restricted
+    mode: '0644'
+  when: apparmor_enabled and apparmor_k3s_profile_enabled
+  notify: Reload AppArmor
+
+- name: Load K3s AppArmor profile
+  command: apparmor_parser -r /etc/apparmor.d/k3s-restricted
+  when: apparmor_enabled and apparmor_k3s_profile_enabled
+  changed_when: false
+
+- name: Display kernel security status
+  debug:
+    msg: |
+      ✅ Kernel security hardening configured!
+      
+      SYN Cookies:
+      - Enabled: {{ syn_cookies_enabled }}
+      - Max SYN backlog: {{ tcp_max_syn_backlog }}
+      - Protection against SYN flood DDoS
+      
+      Connection Tracking:
+      - Max connections: {{ conntrack_max }}
+      - Per-IP limit: {{ conntrack_limit_per_ip }}
+      - New conn rate: {{ conntrack_new_limit_per_ip }}/sec
+      
+      AppArmor:
+      - Enabled: {{ apparmor_enabled }}
+      - K3s profile: {{ apparmor_k3s_profile_enabled }}
+      
+      Check status:
+      - SYN cookies: sysctl net.ipv4.tcp_syncookies
+      - Conntrack: cat /proc/sys/net/netfilter/nf_conntrack_count
+      - AppArmor: aa-status
