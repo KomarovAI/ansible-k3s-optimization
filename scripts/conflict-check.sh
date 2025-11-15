@@ -210,14 +210,15 @@ else
     done
     
     # Check iptables rules (improved: check all chains, accept any recent rules)
-    # FIX: Use temp variable to handle pipefail + grep -q SIGPIPE properly
-    # grep -q exits when it finds first match, causing SIGPIPE to previous command
+    # FIX: grep -q exits when it finds first match, causing SIGPIPE (exit 141) to iptables-save
+    # Both exit 0 (found) and 141 (found + SIGPIPE) mean success
     set +e  # Temporarily disable exit on error
     iptables-save 2>/dev/null | grep -q "\-m recent"
     GREP_RESULT=$?
     set -e  # Re-enable exit on error
     
-    if [ $GREP_RESULT -ne 0 ]; then
+    # Only warn if grep truly failed (not 0 and not 141)
+    if [ $GREP_RESULT -ne 0 ] && [ $GREP_RESULT -ne 141 ]; then
         echo -e "  ${YELLOW}\u26a0\ufe0f  No iptables rules using xt_recent${NC}"
         ((XT_RECENT_ISSUES+=1))
     fi
