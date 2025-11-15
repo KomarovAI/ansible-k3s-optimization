@@ -1,0 +1,54 @@
+---
+- name: Install Diagnostic Tools
+  hosts: localhost
+  connection: local
+  become: yes
+  gather_facts: yes
+
+  tasks:
+    - name: Copy conflict check script
+      copy:
+        src: ../scripts/conflict-check.sh
+        dest: /usr/local/bin/k3s-conflict-check
+        mode: '0755'
+        owner: root
+        group: root
+
+    - name: Create diagnostic cron job (daily)
+      cron:
+        name: "K3s daily conflict check"
+        minute: "0"
+        hour: "6"
+        job: "/usr/local/bin/k3s-conflict-check > /var/log/k3s-conflict-check.log 2>&1"
+        user: root
+        state: present
+
+    - name: Create log rotation for conflict check
+      copy:
+        content: |
+          /var/log/k3s-conflict-check.log {
+              daily
+              rotate 7
+              compress
+              delaycompress
+              missingok
+              notifempty
+              create 0640 root root
+          }
+        dest: /etc/logrotate.d/k3s-conflict-check
+        mode: '0644'
+
+    - name: Display installation message
+      debug:
+        msg: |
+          ✅ Diagnostic tools installed successfully!
+          
+          Available commands:
+          • /usr/local/bin/k3s-conflict-check - Quick conflict check
+          • ansible-playbook playbooks/diagnostic-comprehensive.yml - Detailed diagnostics
+          
+          Automatic checks:
+          • Daily cron job at 06:00
+          • Logs: /var/log/k3s-conflict-check.log
+          
+          Run now: /usr/local/bin/k3s-conflict-check
