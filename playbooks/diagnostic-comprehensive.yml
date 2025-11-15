@@ -104,7 +104,7 @@
       when: sysctl_conflicts.stdout == ""
 
     #########################################################################
-    # 3. PORT CONFLICTS CHECK (FIXED: HONEYPOT PID DEDUPLICATION)
+    # 3. PORT CONFLICTS CHECK (FIXED: FILTER K3S PORTS)
     #########################################################################
     - name: Get honeypot PID
       shell: "ps aux | grep '[h]oneypot.py' | awk '{print $2}'"
@@ -112,10 +112,11 @@
       changed_when: false
       failed_when: false
 
-    - name: Check for port conflicts
+    - name: Check for port conflicts (exclude K3s etcd ports 2379, 2380)
       shell: |
         netstat -tlnp 2>/dev/null | awk 'NR>2 {print $4, $7}' | \
-          awk -F: '{print $NF}' | sort | uniq -c | awk '$1 > 1 {print "⚠️  Port", $2, "used by", $1, "processes"}'
+          awk -F: '{print $NF}' | grep -v '^2379$' | grep -v '^2380$' | \
+          sort | uniq -c | awk '$1 > 1 {print "⚠️  Port", $2, "used by", $1, "processes"}'
       register: port_conflicts
       changed_when: false
       failed_when: false
@@ -124,7 +125,6 @@
       shell: |
         honeypot_pid='{{ honeypot_pid.stdout }}'
         if [ -z "$honeypot_pid" ]; then
-          echo ""
           exit 0
         fi
         honeypot_ports="21 22 23 25 110 143 3306 3389 5432"
@@ -135,7 +135,9 @@
             conflicts="${conflicts}❌ Port $port: honeypot conflicts with $real_service\n"
           fi
         done
-        echo -e "$conflicts"
+        if [ -n "$conflicts" ]; then
+          printf "%b" "$conflicts"
+        fi
       register: honeypot_conflicts
       changed_when: false
       failed_when: false
@@ -166,7 +168,7 @@
       when: port_conflicts.stdout == "" and honeypot_conflicts.stdout == ""
 
     #########################################################################
-    # 4. SYSTEMD SERVICE CONFLICTS (FIXED: DYNAMIC ARPWATCH INTERFACE)
+    # 4. SYSTEMD SERVICE CONFLICTS (FIXED: CLEAN OUTPUT)
     #########################################################################
     - name: Detect main network interface
       shell: "ip route get 1 | awk '{print $5; exit}'"
@@ -176,23 +178,28 @@
     - name: Check for failed security services
       shell: |
         main_iface='{{ main_iface.stdout }}'
+        failures=""
         for service in fail2ban psad arpwatch-${main_iface} arpwatch-cni0 honeypot; do
           if systemctl is-enabled $service &>/dev/null; then
             status=$(systemctl is-active $service)
             if [ "$status" != "active" ]; then
-              echo "❌ $service: $status"
+              failures="${failures}❌ $service: $status\n"
             fi
           fi
         done
+        if [ -n "$failures" ]; then
+          printf "%b" "$failures"
+        fi
       register: service_failures
       changed_when: false
       failed_when: false
 
     - name: Check for duplicate services on same ports
       shell: |
-        systemctl list-units --type=service --state=running | \
-          grep -E 'ssh|sshd' | wc -l | \
-          awk '$1 > 1 {print "⚠️  Multiple SSH services running: " $1}'
+        count=$(systemctl list-units --type=service --state=running | grep -E 'ssh|sshd' | wc -l)
+        if [ $count -gt 1 ]; then
+          echo "⚠️  Multiple SSH services running: $count"
+        fi
       register: duplicate_services
       changed_when: false
       failed_when: false
@@ -228,24 +235,20 @@
     - name: Check for conflicting kernel modules
       shell: |
         conflicts=""
-        # Check xt_recent vs ipt_recent conflict
         if lsmod | grep -q ipt_recent && lsmod | grep -q xt_recent; then
           conflicts="${conflicts}❌ xt_recent and ipt_recent both loaded (conflict)\n"
         fi
-        
-        # Check nf_conntrack loaded
         if ! lsmod | grep -q nf_conntrack; then
           conflicts="${conflicts}⚠️  nf_conntrack not loaded (required for iptables)\n"
         fi
-        
-        # Check iptables modules
         for mod in iptable_filter iptable_nat ip_tables; do
           if ! lsmod | grep -q "^$mod "; then
             conflicts="${conflicts}⚠️  $mod not loaded\n"
           fi
         done
-        
-        echo -e "$conflicts"
+        if [ -n "$conflicts" ]; then
+          printf "%b" "$conflicts"
+        fi
       register: module_conflicts
       changed_when: false
       failed_when: false
@@ -276,32 +279,37 @@
     - name: Check ipset set conflicts
       shell: |
         conflicts=""
-        # Check for duplicate set names
-        ipset list -n | sort | uniq -d | while read set; do
-          conflicts="${conflicts}❌ Duplicate ipset: $set\n"
-        done
-        
-        # Check if fail2ban sets exist
+        duplicates=$(ipset list -n | sort | uniq -d)
+        if [ -n "$duplicates" ]; then
+          while IFS= read -r set; do
+            conflicts="${conflicts}❌ Duplicate ipset: $set\n"
+          done <<< "$duplicates"
+        fi
         for set in fail2ban-sshd fail2ban-honeypot blacklist; do
           if ! ipset list -n | grep -q "^$set$"; then
             conflicts="${conflicts}⚠️  Missing ipset: $set\n"
           fi
         done
-        
-        echo -e "$conflicts"
+        if [ -n "$conflicts" ]; then
+          printf "%b" "$conflicts"
+        fi
       register: ipset_conflicts
       changed_when: false
       failed_when: false
 
     - name: Check ipset in iptables
       shell: |
+        unused=""
         for set in blacklist fail2ban-sshd fail2ban-honeypot; do
           if ipset list -n | grep -q "^$set$"; then
             if ! iptables -S | grep -q "match-set $set"; then
-              echo "⚠️  ipset $set exists but not used in iptables"
+              unused="${unused}⚠️  ipset $set exists but not used in iptables\n"
             fi
           fi
         done
+        if [ -n "$unused" ]; then
+          printf "%b" "$unused"
+        fi
       register: ipset_unused
       changed_when: false
       failed_when: false
@@ -337,24 +345,20 @@
     - name: Check xt_recent functionality
       shell: |
         issues=""
-        # Check if module loaded
         if ! lsmod | grep -q xt_recent; then
           issues="${issues}❌ xt_recent module not loaded\n"
         fi
-        
-        # Check if tracking files exist
         for list in ssh_attack portscan; do
           if [ ! -f /proc/net/xt_recent/$list ]; then
             issues="${issues}⚠️  xt_recent list '$list' not created\n"
           fi
         done
-        
-        # Check if iptables rules exist
         if ! iptables -S | grep -q "recent.*ssh_attack"; then
           issues="${issues}⚠️  No iptables rules using xt_recent for SSH\n"
         fi
-        
-        echo -e "$issues"
+        if [ -n "$issues" ]; then
+          printf "%b" "$issues"
+        fi
       register: xt_recent_check
       changed_when: false
       failed_when: false
@@ -385,7 +389,6 @@
     - name: Check resource usage
       shell: |
         issues=""
-        # Memory
         mem_total=$(free -m | awk '/^Mem:/ {print $2}')
         mem_used=$(free -m | awk '/^Mem:/ {print $3}')
         mem_percent=$((mem_used * 100 / mem_total))
@@ -394,24 +397,21 @@
         elif [ $mem_percent -gt 80 ]; then
           issues="${issues}⚠️  Memory usage high: ${mem_percent}%\n"
         fi
-        
-        # CPU
         cpu_usage=$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1)
         if [ $(echo "$cpu_usage > 90" | bc) -eq 1 ]; then
           issues="${issues}❌ CPU usage critical: ${cpu_usage}%\n"
         elif [ $(echo "$cpu_usage > 80" | bc) -eq 1 ]; then
           issues="${issues}⚠️  CPU usage high: ${cpu_usage}%\n"
         fi
-        
-        # Disk
         disk_usage=$(df / | awk 'NR==2 {print $5}' | sed 's/%//')
         if [ $disk_usage -gt 90 ]; then
           issues="${issues}❌ Disk usage critical: ${disk_usage}%\n"
         elif [ $disk_usage -gt 80 ]; then
           issues="${issues}⚠️  Disk usage high: ${disk_usage}%\n"
         fi
-        
-        echo -e "$issues"
+        if [ -n "$issues" ]; then
+          printf "%b" "$issues"
+        fi
       register: resource_issues
       changed_when: false
       failed_when: false
