@@ -104,8 +104,14 @@
       when: sysctl_conflicts.stdout == ""
 
     #########################################################################
-    # 3. PORT CONFLICTS CHECK
+    # 3. PORT CONFLICTS CHECK (FIXED: HONEYPOT PID DEDUPLICATION)
     #########################################################################
+    - name: Get honeypot PID
+      shell: "ps aux | grep '[h]oneypot.py' | awk '{print $2}'"
+      register: honeypot_pid
+      changed_when: false
+      failed_when: false
+
     - name: Check for port conflicts
       shell: |
         netstat -tlnp 2>/dev/null | awk 'NR>2 {print $4, $7}' | \
@@ -114,12 +120,14 @@
       changed_when: false
       failed_when: false
 
-    - name: Check honeypot vs real service ports
+    - name: Check honeypot vs real service ports (exclude honeypot PID)
       shell: |
         honeypot_ports="21 22 23 25 110 143 3306 3389 5432"
+        honeypot_pid="{{ honeypot_pid.stdout }}"
         conflicts=""
         for port in $honeypot_ports; do
-          real_service=$(netstat -tlnp 2>/dev/null | grep ":$port " | grep -v honeypot | awk '{print $7}')
+          # Exclude honeypot's own PID from conflict check
+          real_service=$(netstat -tlnp 2>/dev/null | grep ":$port " | grep -v "$honeypot_pid" | grep -v honeypot | awk '{print $7}')
           if [ -n "$real_service" ]; then
             conflicts="${conflicts}❌ Port $port: honeypot conflicts with $real_service\n"
           fi
@@ -155,11 +163,17 @@
       when: port_conflicts.stdout == "" and honeypot_conflicts.stdout == ""
 
     #########################################################################
-    # 4. SYSTEMD SERVICE CONFLICTS
+    # 4. SYSTEMD SERVICE CONFLICTS (FIXED: DYNAMIC ARPWATCH INTERFACE)
     #########################################################################
+    - name: Detect main network interface
+      shell: "ip route get 1 | awk '{print $5; exit}'"
+      register: main_iface
+      changed_when: false
+
     - name: Check for failed security services
       shell: |
-        for service in fail2ban psad arpwatch-eth0 arpwatch-cni0 honeypot; do
+        main_iface="{{ main_iface.stdout }}"
+        for service in fail2ban psad arpwatch-${main_iface} arpwatch-cni0 honeypot; do
           if systemctl is-enabled $service &>/dev/null; then
             status=$(systemctl is-active $service)
             if [ "$status" != "active" ]; then
