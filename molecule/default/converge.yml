@@ -1,0 +1,10 @@
+---
+- name: Test idempotency
+  hosts: all
+  become: true
+  tasks:
+    - name: Include main playbook
+      import_playbook: ../../playbooks/full-setup.yml
+
+    - name: Run playbook again to test idempotency
+      import_playbook: ../../playbooks/full-setup.yml

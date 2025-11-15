@@ -1,0 +1,30 @@
+---
+- name: Проверка автоматического summary и алертов
+  hosts: all
+  become: true
+  tasks:
+    - name: Запуск диагностики
+      import_playbook: ../../playbooks/diagnostic-comprehensive.yml
+    - name: Экспорт summary в файл
+      copy:
+        content: |
+          {{ diagnostic_output | join('\n') }}
+        dest: /tmp/diagnostic-summary-{{ ansible_hostname }}.txt
+    - name: Email уведомление (пример, при наличии alert_email_enabled)
+      mail:
+        to: "{{ alert_email_recipient }}"
+        subject: "K3s Diagnostic Summary {{ inventory_hostname }}"
+        body: |
+          {{ diagnostic_output | join('\n') }}
+        subtype: plain
+      when: alert_email_enabled
+    - name: Slack уведомление (пример)
+      uri:
+        url: "{{ slack_webhook_url }}"
+        method: POST
+        headers:
+          Content-Type: "application/json"
+        body: |
+          {"text": "K3s Diagnostic Summary {{ inventory_hostname }}\n{{ diagnostic_output | join('\\n') }}"}
+        body_format: json
+      when: slack_notify_enabled and slack_webhook_url != ""

@@ -1,0 +1,51 @@
+# group_vars/all.yml — централизованные переменные для всех ролей
+---
+# Системная оптимизация
+kernel_params:
+  net.core.somaxconn: 32768
+  net.core.netdev_max_backlog: 16384
+  net.ipv4.tcp_max_syn_backlog: 8096
+  net.ipv4.tcp_tw_reuse: 1
+  net.bridge.bridge-nf-call-iptables: 1
+  net.bridge.bridge-nf-call-ip6tables: 1
+  net.ipv4.ip_forward: 1
+  vm.swappiness: 1
+  vm.dirty_ratio: 10
+  vm.min_free_kbytes: 131072
+system_limits:
+  - domain: '*'
+    type: soft
+    item: nofile
+    value: 65536
+  - domain: '*'
+    type: hard
+    item: nofile
+    value: 65536
+zram_size_mb: 768
+zram_compression: lz4
+
+# K3s Audit
+k3s_audit_script_path: "/usr/local/bin/k3s-cluster-audit"
+k3s_audit_reports_dir: "/var/log/k3s-audit"
+k3s_audit_retention_days: 30
+k3s_audit_cron_enabled: true
+k3s_audit_cron_schedule: "0 6 * * 0"
+
+# Security Stack
+psad_auto_ids_danger_level: 3
+psad_auto_block_timeout: 86400
+ipset_hash_size: 2048
+ipset_max_elem: 100000
+ssh_rate_limit_hitcount: 3
+portscan_hitcount: 8
+conntrack_limit_per_ip: 100
+apparmor_enabled: true
+
+# Email/Slack алерты (пример)
+alert_email_enabled: false
+alert_email_recipient: "security@example.com"
+slack_notify_enabled: false
+slack_webhook_url: ""
+
+# Прочее
+ssh_port: 22
