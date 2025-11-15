@@ -1,0 +1,25 @@
+# irqbalance configuration for K3s
+# Ansible managed - do not edit manually
+
+# Enable irqbalance
+ENABLED=1
+
+{% if irqbalance_banned_cpus %}
+# Exclude specific CPUs from IRQ balancing
+# CPU mask (e.g., 00000001 = CPU0)
+IRQBALANCE_BANNED_CPUS={{ irqbalance_banned_cpus }}
+{% endif %}
+
+# Run mode
+{% if irqbalance_oneshot %}
+# One-time balancing
+IRQBALANCE_ONESHOT=1
+{% else %}
+# Continuous balancing (recommended for K3s)
+IRQBALANCE_ONESHOT=0
+{% endif %}
+
+# Additional options
+# -d: Debug mode (logs to syslog)
+# --policyscript: Custom policy script
+OPTIONS=""

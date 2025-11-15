@@ -1,0 +1,10 @@
+---
+- name: Restart irqbalance
+  systemd:
+    name: irqbalance
+    state: restarted
+
+- name: Restart tuned
+  systemd:
+    name: tuned
+    state: restarted

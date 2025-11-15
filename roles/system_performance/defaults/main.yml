@@ -1,0 +1,36 @@
+---
+# System Performance Optimization Configuration
+
+# irqbalance settings
+irqbalance_enabled: true
+irqbalance_banned_cpus: ""  # CPU mask to exclude from IRQ balancing (e.g., "00000001" for CPU0)
+irqbalance_oneshot: false  # Run continuously (false) or one-time (true)
+
+# tuned profile settings
+tuned_enabled: true
+tuned_profile: k3s-optimized  # Options: k3s-optimized, latency-performance, throughput-performance
+
+# Custom K3s tuned profile parameters
+k3s_tuned_cpu_governor: performance
+k3s_tuned_cpu_energy_perf_bias: performance
+k3s_tuned_io_scheduler: mq-deadline
+
+# Kernel parameters for K3s tuned profile
+k3s_tuned_sysctl:
+  net.core.somaxconn: 32768
+  net.core.netdev_max_backlog: 16384
+  net.ipv4.tcp_max_syn_backlog: 8096
+  net.ipv4.tcp_slow_start_after_idle: 0
+  net.ipv4.tcp_tw_reuse: 1
+  net.ipv4.ip_local_port_range: "1024 65535"
+  vm.swappiness: 1
+  vm.dirty_ratio: 10
+  vm.dirty_background_ratio: 5
+  fs.file-max: 2097152
+  net.netfilter.nf_conntrack_max: 1048576
+
+# Transparent Huge Pages (THP) setting
+# Options: always, madvise, never
+# Recommendation: madvise for K3s (avoids latency spikes in etcd)
+thp_enabled: madvise
+thp_defrag: madvise

@@ -1,0 +1,38 @@
+# Custom tuned profile for K3s optimization
+# Ansible managed - do not edit manually
+
+[main]
+summary=K3s optimized performance profile
+include=latency-performance
+
+[cpu]
+# CPU governor: performance = max frequency always
+governor={{ k3s_tuned_cpu_governor }}
+
+# Energy performance bias: performance = favor performance over power saving
+energy_perf_bias={{ k3s_tuned_cpu_energy_perf_bias }}
+
+# Disable CPU idle states for lowest latency
+force_latency=1
+
+[disk]
+# I/O scheduler optimized for SSDs and NVMe
+# mq-deadline: low latency, good for mixed workloads
+elevator={{ k3s_tuned_io_scheduler }}
+
+# Read-ahead for better sequential read performance
+readahead=>4096
+
+[sysctl]
+# Network performance
+{% for key, value in k3s_tuned_sysctl.items() %}
+{{ key }}={{ value }}
+{% endfor %}
+
+[vm]
+# Transparent Huge Pages
+transparent_hugepages={{ thp_enabled }}
+
+[bootloader]
+# Kernel boot parameters
+cmdline_k3s=+isolcpus= nohz_full= rcu_nocbs=
