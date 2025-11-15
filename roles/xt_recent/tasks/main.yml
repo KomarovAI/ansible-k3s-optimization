@@ -1,0 +1,112 @@
+---
+- name: Configure xt_recent kernel module parameters
+  copy:
+    content: |
+      # Increase xt_recent limits for tracking more IPs
+      options xt_recent ip_list_tot={{ xt_recent_ip_list_tot }} ip_pkt_list_tot={{ xt_recent_ip_pkt_list_tot }}
+    dest: /etc/modprobe.d/xt_recent.conf
+    mode: '0644'
+
+- name: Load xt_recent module with new parameters
+  modprobe:
+    name: xt_recent
+    state: present
+
+- name: Configure SSH rate limiting with xt_recent
+  block:
+    - name: Set SSH connection tracking
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ ssh_port }}"
+        match: state
+        ctstate: NEW
+        jump: SET
+        set_name: ssh_attack
+        set_operation: set
+        comment: "Track SSH connection attempts"
+        state: present
+
+    - name: Drop excessive SSH connections
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        destination_port: "{{ ssh_port }}"
+        match: state
+        ctstate: NEW
+        jump: DROP
+        match_set: ssh_attack
+        match_set_flags: src
+        recent_seconds: "{{ ssh_rate_limit_seconds }}"
+        recent_hitcount: "{{ ssh_rate_limit_hitcount }}"
+        comment: "Drop SSH brute-force attempts"
+        state: present
+
+- name: Configure port scan detection with xt_recent
+  block:
+    - name: Set port scan tracking
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        match: state
+        ctstate: NEW
+        jump: SET
+        set_name: portscan
+        set_operation: set
+        comment: "Track new TCP connections"
+        state: present
+
+    - name: Log port scan attempts
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        match: state
+        ctstate: NEW
+        jump: LOG
+        log_prefix: '[PORTSCAN DETECTED] '
+        log_level: warning
+        match_set: portscan
+        match_set_flags: src
+        recent_seconds: "{{ portscan_seconds }}"
+        recent_hitcount: "{{ portscan_hitcount }}"
+        comment: "Log port scanners"
+        state: present
+
+    - name: Drop port scan attempts
+      iptables:
+        chain: INPUT
+        protocol: tcp
+        match: state
+        ctstate: NEW
+        jump: DROP
+        match_set: portscan
+        match_set_flags: src
+        recent_seconds: "{{ portscan_seconds }}"
+        recent_hitcount: "{{ portscan_hitcount }}"
+        comment: "Drop port scanners"
+        state: present
+
+- name: Save iptables rules
+  shell: |
+    iptables-save > /etc/iptables/rules.v4
+  changed_when: false
+
+- name: Display xt_recent status
+  debug:
+    msg: |
+      ✅ xt_recent kernel-based rate limiting configured!
+      
+      SSH Protection:
+      - Max {{ ssh_rate_limit_hitcount }} attempts per {{ ssh_rate_limit_seconds }} seconds
+      - Port: {{ ssh_port }}
+      
+      Port Scan Detection:
+      - Triggers on {{ portscan_hitcount }} ports in {{ portscan_seconds }} seconds
+      - Auto-ban at kernel level (no log parsing!)
+      
+      View tracked IPs:
+      - cat /proc/net/xt_recent/ssh_attack
+      - cat /proc/net/xt_recent/portscan
+      
+      Clear tracked IP:
+      - echo -1.2.3.4 > /proc/net/xt_recent/ssh_attack

@@ -1,0 +1,5 @@
+---
+- name: Reload iptables
+  shell: |
+    iptables-restore < /etc/iptables/rules.v4
+  changed_when: false

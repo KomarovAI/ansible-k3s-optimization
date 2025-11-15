@@ -1,0 +1,13 @@
+---
+# xt_recent module configuration
+xt_recent_ip_list_tot: 10000
+xt_recent_ip_pkt_list_tot: 50
+
+# SSH rate limiting
+ssh_rate_limit_seconds: 60
+ssh_rate_limit_hitcount: 4
+ssh_port: 27015
+
+# Port scan detection
+portscan_seconds: 10
+portscan_hitcount: 10
