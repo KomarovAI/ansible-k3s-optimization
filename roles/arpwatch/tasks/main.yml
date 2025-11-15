@@ -1,0 +1,72 @@
+---
+- name: Install ARPwatch
+  apt:
+    name:
+      - arpwatch
+    state: present
+    update_cache: yes
+
+- name: Create ARPwatch systemd services for each interface
+  template:
+    content: |
+      [Unit]
+      Description=ARPwatch on {{ item.name }}
+      After=network.target
+
+      [Service]
+      Type=forking
+      ExecStart=/usr/sbin/arpwatch -i {{ item.name }} -f {{ item.log_file }}
+      Restart=always
+      RestartSec=10
+
+      [Install]
+      WantedBy=multi-user.target
+    dest: /etc/systemd/system/arpwatch-{{ item.name }}.service
+    mode: '0644'
+  loop: "{{ arpwatch_interfaces }}"
+  notify: Reload systemd
+
+- name: Create log files
+  file:
+    path: "{{ item.log_file }}"
+    state: touch
+    mode: '0644'
+    modification_time: preserve
+    access_time: preserve
+  loop: "{{ arpwatch_interfaces }}"
+
+- name: Enable and start ARPwatch services
+  systemd:
+    name: arpwatch-{{ item.name }}
+    enabled: yes
+    state: started
+    daemon_reload: yes
+  loop: "{{ arpwatch_interfaces }}"
+
+- name: Configure logrotate for ARPwatch
+  copy:
+    content: |
+      {% for iface in arpwatch_interfaces %}
+      {{ iface.log_file }} {
+          daily
+          rotate 30
+          compress
+          delaycompress
+          missingok
+          notifempty
+          create 0644 root root
+      }
+      {% endfor %}
+    dest: /etc/logrotate.d/arpwatch
+    mode: '0644'
+
+- name: Display ARPwatch status
+  debug:
+    msg: |
+      ✅ ARPwatch installed and monitoring interfaces!
+      
+      Interfaces: {{ arpwatch_interfaces | map(attribute='name') | list | join(', ') }}
+      
+      Check ARP table: arp -an
+      View logs: tail -f /var/log/arpwatch-*.log
+      Database: cat /var/lib/arpwatch/*.dat

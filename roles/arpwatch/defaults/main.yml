@@ -1,0 +1,10 @@
+---
+# ARPwatch configuration
+arpwatch_interfaces:
+  - name: eth0
+    log_file: /var/log/arpwatch-eth0.log
+  - name: cni0
+    log_file: /var/log/arpwatch-cni0.log
+
+arpwatch_email_enabled: true
+arpwatch_email: root@localhost
